@@ -1,0 +1,2 @@
+rootProject.name = "MemoryScanner"
+include ':app'
