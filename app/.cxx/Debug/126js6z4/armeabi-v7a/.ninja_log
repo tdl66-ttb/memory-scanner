@@ -1,7 +1,3 @@
 # ninja log v5
-1	70	1786414145628023102	build.ninja	124634fb23448033
-0	3099	1786413306701977314	CMakeFiles/memscanner.dir/memscanner.cpp.o	b53ad23d41472bbc
-1	6	0	clean	c5e4e4f108c0d31b
-3118	3327	1786413306917977326	/workspaces/memory-scanner/memory-scanner/app/build/intermediates/cxx/Debug/126js6z4/obj/armeabi-v7a/libmemscanner.so	23a3c5457ed1764e
-7	2652	1786414148431023255	CMakeFiles/memscanner.dir/memscanner.cpp.o	75d325f6041bf8cb
-2654	2847	1786414148630023265	/workspaces/memory-scanner/memory-scanner/app/build/intermediates/cxx/Debug/126js6z4/obj/armeabi-v7a/libmemscanner.so	9e9e756f1ce8b611
+0	1780	1789266623622867833	CMakeFiles/memscanner.dir/memscanner.cpp.o	b1152862c63a9bcd
+1782	1873	1789266623718867826	/workspaces/memory-scanner/app/build/intermediates/cxx/Debug/126js6z4/obj/armeabi-v7a/libmemscanner.so	6fa263de81cbaa74

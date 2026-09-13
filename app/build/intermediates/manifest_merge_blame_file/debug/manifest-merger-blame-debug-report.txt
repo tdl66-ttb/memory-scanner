@@ -6,26 +6,26 @@
 6
 7    <uses-sdk
 8        android:minSdkVersion="21"
-8-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml
+8-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml
 9        android:targetSdkVersion="33" />
-9-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml
+9-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml
 10
 11    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-11-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:4:5-78
-11-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:4:22-75
+11-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:4:5-78
+11-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:4:22-75
 12    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-12-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:5:5-77
-12-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:5:22-74
+12-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:5:5-77
+12-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:5:22-74
 13    <uses-permission android:name="android.permission.INTERNET" />
-13-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:6:5-67
-13-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:6:22-64
+13-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:6:5-67
+13-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:6:22-64
 14    <!-- Para salvar/ler arquivos -->
 15    <uses-permission
-15-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:8:5-9:38
+15-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:8:5-9:38
 16        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-16-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:8:22-78
+16-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:8:22-78
 17        android:maxSdkVersion="28" />
-17-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:9:9-35
+17-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:9:9-35
 18
 19    <permission
 19-->[androidx.core:core:1.9.0] /home/codespace/.gradle/caches/8.10.2/transforms/68ffa4751f8687e4d4d08e5f461f905d/transformed/core-1.9.0/AndroidManifest.xml:22:5-24:47
@@ -39,50 +39,50 @@
 23-->[androidx.core:core:1.9.0] /home/codespace/.gradle/caches/8.10.2/transforms/68ffa4751f8687e4d4d08e5f461f905d/transformed/core-1.9.0/AndroidManifest.xml:26:22-94
 24
 25    <application
-25-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:11:5-35:19
+25-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:11:5-35:19
 26        android:allowBackup="true"
-26-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:12:9-35
+26-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:12:9-35
 27        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
 27-->[androidx.core:core:1.9.0] /home/codespace/.gradle/caches/8.10.2/transforms/68ffa4751f8687e4d4d08e5f461f905d/transformed/core-1.9.0/AndroidManifest.xml:28:18-86
 28        android:debuggable="true"
 29        android:extractNativeLibs="true"
-29-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:15:9-41
+29-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:15:9-41
 30        android:label="Memory Scanner"
-30-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:13:9-39
+30-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:13:9-39
 31        android:theme="@style/Theme.AppCompat.NoActionBar" >
-31-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:14:9-59
+31-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:14:9-59
 32        <service
-32-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:17:9-21:56
+32-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:17:9-21:56
 33            android:name="com.exemplo.scanner.MemoryScannerService"
-33-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:18:13-49
+33-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:18:13-49
 34            android:enabled="true"
-34-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:19:13-35
+34-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:19:13-35
 35            android:exported="false"
-35-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:20:13-37
+35-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:20:13-37
 36            android:foregroundServiceType="dataSync" />
-36-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:21:13-53
+36-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:21:13-53
 37
 38        <activity
-38-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:23:9-33:20
+38-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:23:9-33:20
 39            android:name="com.exemplo.scanner.OverlayPermissionActivity"
-39-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:24:13-54
+39-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:24:13-54
 40            android:excludeFromRecents="true"
-40-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:26:13-46
+40-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:26:13-46
 41            android:exported="true"
-41-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:28:13-36
+41-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:28:13-36
 42            android:launchMode="singleInstance"
-42-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:27:13-48
+42-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:27:13-48
 43            android:theme="@android:style/Theme.Translucent.NoTitleBar" >
-43-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:25:13-72
+43-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:25:13-72
 44            <intent-filter>
-44-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:29:13-32:29
+44-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:29:13-32:29
 45                <action android:name="android.intent.action.MAIN" />
-45-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:30:17-69
-45-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:30:25-66
+45-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:30:17-69
+45-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:30:25-66
 46
 47                <category android:name="android.intent.category.LAUNCHER" />
-47-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:31:17-77
-47-->/workspaces/memory-scanner/memory-scanner/app/src/main/AndroidManifest.xml:31:27-74
+47-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:31:17-77
+47-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:31:27-74
 48            </intent-filter>
 49        </activity>
 50

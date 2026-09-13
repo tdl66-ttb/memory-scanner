@@ -2,7 +2,7 @@
   {
     "level_": 0,
     "message_": "Start JSON generation. Platform version: 21 min SDK version: armeabi-v7a",
-    "file_": "/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/CMakeLists.txt",
+    "file_": "/workspaces/memory-scanner/app/src/main/cpp/CMakeLists.txt",
     "tag_": "debug|armeabi-v7a",
     "diagnosticCode_": 0,
     "memoizedIsInitialized": 1,
@@ -11,12 +11,12 @@
       "fieldsDescending": {}
     },
     "memoizedSize": -1,
-    "memoizedHashCode": -431587461
+    "memoizedHashCode": 314014684
   },
   {
     "level_": 0,
-    "message_": "rebuilding JSON /workspaces/memory-scanner/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a/android_gradle_build.json due to:",
-    "file_": "/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/CMakeLists.txt",
+    "message_": "rebuilding JSON /workspaces/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a/android_gradle_build.json due to:",
+    "file_": "/workspaces/memory-scanner/app/src/main/cpp/CMakeLists.txt",
     "tag_": "debug|armeabi-v7a",
     "diagnosticCode_": 0,
     "memoizedIsInitialized": 1,
@@ -25,12 +25,12 @@
       "fieldsDescending": {}
     },
     "memoizedSize": -1,
-    "memoizedHashCode": -577137497
+    "memoizedHashCode": -1506646543
   },
   {
     "level_": 0,
-    "message_": "- a file changed",
-    "file_": "/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/CMakeLists.txt",
+    "message_": "- no fingerprint file, will remove stale configuration folder",
+    "file_": "/workspaces/memory-scanner/app/src/main/cpp/CMakeLists.txt",
     "tag_": "debug|armeabi-v7a",
     "diagnosticCode_": 0,
     "memoizedIsInitialized": 1,
@@ -39,12 +39,12 @@
       "fieldsDescending": {}
     },
     "memoizedSize": -1,
-    "memoizedHashCode": -408336447
+    "memoizedHashCode": 1281561153
   },
   {
     "level_": 0,
-    "message_": "  - /workspaces/memory-scanner/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a/build.ninja (LAST_MODIFIED_CHANGED)",
-    "file_": "/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/CMakeLists.txt",
+    "message_": "removing stale contents from \u0027/workspaces/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a\u0027",
+    "file_": "/workspaces/memory-scanner/app/src/main/cpp/CMakeLists.txt",
     "tag_": "debug|armeabi-v7a",
     "diagnosticCode_": 0,
     "memoizedIsInitialized": 1,
@@ -53,12 +53,12 @@
       "fieldsDescending": {}
     },
     "memoizedSize": -1,
-    "memoizedHashCode": 1838735688
+    "memoizedHashCode": -1861151140
   },
   {
     "level_": 0,
-    "message_": "  - /workspaces/memory-scanner/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a/compile_commands.json (LAST_MODIFIED_CHANGED)",
-    "file_": "/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/CMakeLists.txt",
+    "message_": "created folder \u0027/workspaces/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a\u0027",
+    "file_": "/workspaces/memory-scanner/app/src/main/cpp/CMakeLists.txt",
     "tag_": "debug|armeabi-v7a",
     "diagnosticCode_": 0,
     "memoizedIsInitialized": 1,
@@ -67,12 +67,12 @@
       "fieldsDescending": {}
     },
     "memoizedSize": -1,
-    "memoizedHashCode": -106823712
+    "memoizedHashCode": -426652208
   },
   {
     "level_": 0,
-    "message_": "  - /workspaces/memory-scanner/memory-scanner/app/src/main/cpp/CMakeLists.txt (LAST_MODIFIED_CHANGED)",
-    "file_": "/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/CMakeLists.txt",
+    "message_": "executing cmake /home/codespace/android-sdk/cmake/3.22.1/bin/cmake \\\n  -H/workspaces/memory-scanner/app/src/main/cpp \\\n  -DCMAKE_SYSTEM_NAME\u003dAndroid \\\n  -DCMAKE_EXPORT_COMPILE_COMMANDS\u003dON \\\n  -DCMAKE_SYSTEM_VERSION\u003d21 \\\n  -DANDROID_PLATFORM\u003dandroid-21 \\\n  -DANDROID_ABI\u003darmeabi-v7a \\\n  -DCMAKE_ANDROID_ARCH_ABI\u003darmeabi-v7a \\\n  -DANDROID_NDK\u003d/home/codespace/android-sdk/ndk/23.1.7779620 \\\n  -DCMAKE_ANDROID_NDK\u003d/home/codespace/android-sdk/ndk/23.1.7779620 \\\n  -DCMAKE_TOOLCHAIN_FILE\u003d/home/codespace/android-sdk/ndk/23.1.7779620/build/cmake/android.toolchain.cmake \\\n  -DCMAKE_MAKE_PROGRAM\u003d/home/codespace/android-sdk/cmake/3.22.1/bin/ninja \\\n  \"-DCMAKE_CXX_FLAGS\u003d-std\u003dc++17 -fPIC -Wall -Wextra -O2\" \\\n  -DCMAKE_LIBRARY_OUTPUT_DIRECTORY\u003d/workspaces/memory-scanner/app/build/intermediates/cxx/Debug/126js6z4/obj/armeabi-v7a \\\n  -DCMAKE_RUNTIME_OUTPUT_DIRECTORY\u003d/workspaces/memory-scanner/app/build/intermediates/cxx/Debug/126js6z4/obj/armeabi-v7a \\\n  -DCMAKE_BUILD_TYPE\u003dDebug \\\n  -B/workspaces/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a \\\n  -GNinja\n",
+    "file_": "/workspaces/memory-scanner/app/src/main/cpp/CMakeLists.txt",
     "tag_": "debug|armeabi-v7a",
     "diagnosticCode_": 0,
     "memoizedIsInitialized": 1,
@@ -81,12 +81,12 @@
       "fieldsDescending": {}
     },
     "memoizedSize": -1,
-    "memoizedHashCode": 1853721931
+    "memoizedHashCode": 682374661
   },
   {
     "level_": 0,
-    "message_": "keeping json folder \u0027/workspaces/memory-scanner/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a\u0027 but regenerating project",
-    "file_": "/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/CMakeLists.txt",
+    "message_": "/home/codespace/android-sdk/cmake/3.22.1/bin/cmake \\\n  -H/workspaces/memory-scanner/app/src/main/cpp \\\n  -DCMAKE_SYSTEM_NAME\u003dAndroid \\\n  -DCMAKE_EXPORT_COMPILE_COMMANDS\u003dON \\\n  -DCMAKE_SYSTEM_VERSION\u003d21 \\\n  -DANDROID_PLATFORM\u003dandroid-21 \\\n  -DANDROID_ABI\u003darmeabi-v7a \\\n  -DCMAKE_ANDROID_ARCH_ABI\u003darmeabi-v7a \\\n  -DANDROID_NDK\u003d/home/codespace/android-sdk/ndk/23.1.7779620 \\\n  -DCMAKE_ANDROID_NDK\u003d/home/codespace/android-sdk/ndk/23.1.7779620 \\\n  -DCMAKE_TOOLCHAIN_FILE\u003d/home/codespace/android-sdk/ndk/23.1.7779620/build/cmake/android.toolchain.cmake \\\n  -DCMAKE_MAKE_PROGRAM\u003d/home/codespace/android-sdk/cmake/3.22.1/bin/ninja \\\n  \"-DCMAKE_CXX_FLAGS\u003d-std\u003dc++17 -fPIC -Wall -Wextra -O2\" \\\n  -DCMAKE_LIBRARY_OUTPUT_DIRECTORY\u003d/workspaces/memory-scanner/app/build/intermediates/cxx/Debug/126js6z4/obj/armeabi-v7a \\\n  -DCMAKE_RUNTIME_OUTPUT_DIRECTORY\u003d/workspaces/memory-scanner/app/build/intermediates/cxx/Debug/126js6z4/obj/armeabi-v7a \\\n  -DCMAKE_BUILD_TYPE\u003dDebug \\\n  -B/workspaces/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a \\\n  -GNinja\n",
+    "file_": "/workspaces/memory-scanner/app/src/main/cpp/CMakeLists.txt",
     "tag_": "debug|armeabi-v7a",
     "diagnosticCode_": 0,
     "memoizedIsInitialized": 1,
@@ -95,12 +95,12 @@
       "fieldsDescending": {}
     },
     "memoizedSize": -1,
-    "memoizedHashCode": 947790666
+    "memoizedHashCode": -27914812
   },
   {
     "level_": 0,
-    "message_": "executing cmake /usr/local/android-sdk/cmake/3.22.1/bin/cmake \\\n  -H/workspaces/memory-scanner/memory-scanner/app/src/main/cpp \\\n  -DCMAKE_SYSTEM_NAME\u003dAndroid \\\n  -DCMAKE_EXPORT_COMPILE_COMMANDS\u003dON \\\n  -DCMAKE_SYSTEM_VERSION\u003d21 \\\n  -DANDROID_PLATFORM\u003dandroid-21 \\\n  -DANDROID_ABI\u003darmeabi-v7a \\\n  -DCMAKE_ANDROID_ARCH_ABI\u003darmeabi-v7a \\\n  -DANDROID_NDK\u003d/usr/local/android-sdk/ndk/23.1.7779620 \\\n  -DCMAKE_ANDROID_NDK\u003d/usr/local/android-sdk/ndk/23.1.7779620 \\\n  -DCMAKE_TOOLCHAIN_FILE\u003d/usr/local/android-sdk/ndk/23.1.7779620/build/cmake/android.toolchain.cmake \\\n  -DCMAKE_MAKE_PROGRAM\u003d/usr/local/android-sdk/cmake/3.22.1/bin/ninja \\\n  \"-DCMAKE_CXX_FLAGS\u003d-std\u003dc++17 -fPIC -Wall -Wextra -O2\" \\\n  -DCMAKE_LIBRARY_OUTPUT_DIRECTORY\u003d/workspaces/memory-scanner/memory-scanner/app/build/intermediates/cxx/Debug/126js6z4/obj/armeabi-v7a \\\n  -DCMAKE_RUNTIME_OUTPUT_DIRECTORY\u003d/workspaces/memory-scanner/memory-scanner/app/build/intermediates/cxx/Debug/126js6z4/obj/armeabi-v7a \\\n  -DCMAKE_BUILD_TYPE\u003dDebug \\\n  -B/workspaces/memory-scanner/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a \\\n  -GNinja\n",
-    "file_": "/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/CMakeLists.txt",
+    "message_": "Exiting generation of /workspaces/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a/compile_commands.json.bin normally",
+    "file_": "/workspaces/memory-scanner/app/src/main/cpp/CMakeLists.txt",
     "tag_": "debug|armeabi-v7a",
     "diagnosticCode_": 0,
     "memoizedIsInitialized": 1,
@@ -109,40 +109,12 @@
       "fieldsDescending": {}
     },
     "memoizedSize": -1,
-    "memoizedHashCode": 1082075017
-  },
-  {
-    "level_": 0,
-    "message_": "/usr/local/android-sdk/cmake/3.22.1/bin/cmake \\\n  -H/workspaces/memory-scanner/memory-scanner/app/src/main/cpp \\\n  -DCMAKE_SYSTEM_NAME\u003dAndroid \\\n  -DCMAKE_EXPORT_COMPILE_COMMANDS\u003dON \\\n  -DCMAKE_SYSTEM_VERSION\u003d21 \\\n  -DANDROID_PLATFORM\u003dandroid-21 \\\n  -DANDROID_ABI\u003darmeabi-v7a \\\n  -DCMAKE_ANDROID_ARCH_ABI\u003darmeabi-v7a \\\n  -DANDROID_NDK\u003d/usr/local/android-sdk/ndk/23.1.7779620 \\\n  -DCMAKE_ANDROID_NDK\u003d/usr/local/android-sdk/ndk/23.1.7779620 \\\n  -DCMAKE_TOOLCHAIN_FILE\u003d/usr/local/android-sdk/ndk/23.1.7779620/build/cmake/android.toolchain.cmake \\\n  -DCMAKE_MAKE_PROGRAM\u003d/usr/local/android-sdk/cmake/3.22.1/bin/ninja \\\n  \"-DCMAKE_CXX_FLAGS\u003d-std\u003dc++17 -fPIC -Wall -Wextra -O2\" \\\n  -DCMAKE_LIBRARY_OUTPUT_DIRECTORY\u003d/workspaces/memory-scanner/memory-scanner/app/build/intermediates/cxx/Debug/126js6z4/obj/armeabi-v7a \\\n  -DCMAKE_RUNTIME_OUTPUT_DIRECTORY\u003d/workspaces/memory-scanner/memory-scanner/app/build/intermediates/cxx/Debug/126js6z4/obj/armeabi-v7a \\\n  -DCMAKE_BUILD_TYPE\u003dDebug \\\n  -B/workspaces/memory-scanner/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a \\\n  -GNinja\n",
-    "file_": "/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/CMakeLists.txt",
-    "tag_": "debug|armeabi-v7a",
-    "diagnosticCode_": 0,
-    "memoizedIsInitialized": 1,
-    "unknownFields": {
-      "fields": {},
-      "fieldsDescending": {}
-    },
-    "memoizedSize": -1,
-    "memoizedHashCode": 1438187370
-  },
-  {
-    "level_": 0,
-    "message_": "Exiting generation of /workspaces/memory-scanner/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a/compile_commands.json.bin normally",
-    "file_": "/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/CMakeLists.txt",
-    "tag_": "debug|armeabi-v7a",
-    "diagnosticCode_": 0,
-    "memoizedIsInitialized": 1,
-    "unknownFields": {
-      "fields": {},
-      "fieldsDescending": {}
-    },
-    "memoizedSize": -1,
-    "memoizedHashCode": -851601783
+    "memoizedHashCode": 924174965
   },
   {
     "level_": 0,
     "message_": "done executing cmake",
-    "file_": "/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/CMakeLists.txt",
+    "file_": "/workspaces/memory-scanner/app/src/main/cpp/CMakeLists.txt",
     "tag_": "debug|armeabi-v7a",
     "diagnosticCode_": 0,
     "memoizedIsInitialized": 1,
@@ -151,12 +123,12 @@
       "fieldsDescending": {}
     },
     "memoizedSize": -1,
-    "memoizedHashCode": -1874052512
+    "memoizedHashCode": -1128450367
   },
   {
     "level_": 0,
-    "message_": "hard linked /workspaces/memory-scanner/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a/compile_commands.json to /workspaces/memory-scanner/memory-scanner/app/.cxx/tools/debug/armeabi-v7a/compile_commands.json",
-    "file_": "/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/CMakeLists.txt",
+    "message_": "hard linked /workspaces/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a/compile_commands.json to /workspaces/memory-scanner/app/.cxx/tools/debug/armeabi-v7a/compile_commands.json",
+    "file_": "/workspaces/memory-scanner/app/src/main/cpp/CMakeLists.txt",
     "tag_": "debug|armeabi-v7a",
     "diagnosticCode_": 0,
     "memoizedIsInitialized": 1,
@@ -165,12 +137,12 @@
       "fieldsDescending": {}
     },
     "memoizedSize": -1,
-    "memoizedHashCode": 869182739
+    "memoizedHashCode": 1339516560
   },
   {
     "level_": 0,
     "message_": "JSON generation completed without problems",
-    "file_": "/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/CMakeLists.txt",
+    "file_": "/workspaces/memory-scanner/app/src/main/cpp/CMakeLists.txt",
     "tag_": "debug|armeabi-v7a",
     "diagnosticCode_": 0,
     "memoizedIsInitialized": 1,
@@ -179,6 +151,6 @@
       "fieldsDescending": {}
     },
     "memoizedSize": -1,
-    "memoizedHashCode": 64020572
+    "memoizedHashCode": 809622717
   }
 ]

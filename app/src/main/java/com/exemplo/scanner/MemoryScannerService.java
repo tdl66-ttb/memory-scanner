@@ -21,7 +21,6 @@ import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.*;
 import androidx.core.app.NotificationCompat;
-import com.google.android.material.snackbar.Snackbar;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -61,14 +60,14 @@ public class MemoryScannerService extends Service
         System.loadLibrary("memscanner");
     }
 
-    // Métodos nativos
-    public native void nativeStartScan(int value, int type, int condition);
-    public native void nativeNextScan(int value, int condition);
+    // Métodos nativos com assinaturas corrigidas para 64 bits
+    public native void nativeStartScan(long value, int type, int condition);
+    public native void nativeNextScan(long value, int condition);
     public native void nativeCancelScan();
     public native void nativeClearResults();
     public native long[] nativeGetResults();
     public native boolean nativeWriteMemory(long address, byte[] data);
-    public native void nativeToggleFreeze(long address, int value, int type, boolean enable);
+    public native void nativeToggleFreeze(long address, long value, int type, boolean enable);
     public native byte[] nativeReadMemory(long address, int size);
 
     @Override
@@ -100,7 +99,7 @@ public class MemoryScannerService extends Service
         if (panelView != null && panelView.getWindowToken() != null)
             wm.removeView(panelView);
         nativeCancelScan();
-        nativeClearResults(); // também para o freeze
+        nativeClearResults();
         stopForeground(true);
     }
 
@@ -395,7 +394,6 @@ public class MemoryScannerService extends Service
             adapter.notifyDataSetChanged();
             tvTitle.setText("Endereços: 0");
             setStatus("Resultados limpos");
-            // (Opcional: limpar arquivo salvo se desejar)
         } else if (v == btnSave) {
             saveResultsToFile();
         } else if (v == btnLoad) {
@@ -412,7 +410,7 @@ public class MemoryScannerService extends Service
 
     private void startScanInternal() {
         if (!validateInput()) return;
-        int value = parseValue();
+        long value = parseValue();
         int type = spinnerType.getSelectedItemPosition();
         int condition = spinnerCondition.getSelectedItemPosition();
 
@@ -427,7 +425,7 @@ public class MemoryScannerService extends Service
 
     private void nextScanInternal() {
         if (!validateInput()) return;
-        int value = parseValue();
+        long value = parseValue();
         int condition = spinnerCondition.getSelectedItemPosition();
 
         setStatus("Refinando...");
@@ -472,7 +470,6 @@ public class MemoryScannerService extends Service
             }
         }
         toast("Escrita concluída para " + positions.size() + " endereço(s)");
-        // Atualiza a lista com os novos valores (opcional)
         refreshDisplayValues();
     }
 
@@ -484,7 +481,7 @@ public class MemoryScannerService extends Service
         }
         if (!validateInput()) return;
         int type = spinnerType.getSelectedItemPosition();
-        int value = parseValue();
+        long value = parseValue();
 
         for (int pos : positions) {
             String item = displayItems.get(pos);
@@ -497,7 +494,6 @@ public class MemoryScannerService extends Service
     }
 
     private void refreshDisplayValues() {
-        // Lê os valores atuais de todos os endereços e atualiza a lista
         List<String> newItems = new ArrayList<>();
         for (String item : displayItems) {
             long addr = extractAddress(item);
@@ -509,7 +505,7 @@ public class MemoryScannerService extends Service
                     String val = bytesToHex(data);
                     newItems.add(hexAddr + "  " + val);
                 } else {
-                    newItems.add(item); // mantém antigo se falhar
+                    newItems.add(item);
                 }
             } else {
                 newItems.add(item);
@@ -557,14 +553,14 @@ public class MemoryScannerService extends Service
         return true;
     }
 
-    private int parseValue() {
+    private long parseValue() {
         String val = editValue.getText().toString().trim();
         int type = spinnerType.getSelectedItemPosition();
         if (type == TYPE_FLOAT || type == TYPE_DOUBLE) {
             double d = Double.parseDouble(val);
-            return (int) Double.doubleToLongBits(d);
+            return Double.doubleToLongBits(d); // Converte para bits de 64 bits
         } else {
-            return (int) Long.parseLong(val);
+            return Long.parseLong(val); // Retorna long de 64 bits
         }
     }
 
@@ -587,10 +583,13 @@ public class MemoryScannerService extends Service
                 for (int i = 0; i < 8; i++) data[i] = (byte) ((value >> (i * 8)) & 0xFF);
                 break;
             case TYPE_FLOAT:
-            case TYPE_DOUBLE:
-                int intVal = (int) value;
                 data = new byte[4];
+                int intVal = (int) value;
                 for (int i = 0; i < 4; i++) data[i] = (byte) ((intVal >> (i * 8)) & 0xFF);
+                break;
+            case TYPE_DOUBLE:
+                data = new byte[8];
+                for (int i = 0; i < 8; i++) data[i] = (byte) ((value >> (i * 8)) & 0xFF);
                 break;
         }
         return data;

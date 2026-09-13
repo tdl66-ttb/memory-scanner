@@ -1,3 +1,3 @@
-/workspaces/memory-scanner/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a/CMakeFiles/memscanner.dir
-/workspaces/memory-scanner/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a/CMakeFiles/edit_cache.dir
-/workspaces/memory-scanner/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a/CMakeFiles/rebuild_cache.dir
+/workspaces/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a/CMakeFiles/memscanner.dir
+/workspaces/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a/CMakeFiles/edit_cache.dir
+/workspaces/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a/CMakeFiles/rebuild_cache.dir

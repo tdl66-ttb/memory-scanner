@@ -118,7 +118,7 @@ static std::vector<MemoryRegion> parseMaps() {
         std::getline(iss, path);
         if (!path.empty() && path[0] == ' ') path.erase(0,1);
 
-        // Pular regiões especiais e a própria biblioteca
+        // Pular apenas regiões explicitamente indesejadas
         if (path.find("[vsyscall]") != std::string::npos ||
             path.find("[vvar]") != std::string::npos ||
             path.find("[vdso]") != std::string::npos ||
@@ -270,7 +270,17 @@ static void scanThread(jobject callbackObj, long long value, int type, int condi
     }
 
     // Prepara o valor alvo em bytes
-    std::vector<uint8_t> targetBytes = intToBytes(value, type);
+    std::vector<uint8_t> targetBytes;
+    if (type == TYPE_FLOAT) {
+        float f = (float)value;
+        targetBytes.assign((uint8_t*)&f, (uint8_t*)&f + 4);
+    } else if (type == TYPE_DOUBLE) {
+        double d = (double)value;
+        targetBytes.assign((uint8_t*)&d, (uint8_t*)&d + 8);
+    } else {
+        targetBytes = intToBytes(value, type);
+    }
+
     if (targetBytes.empty()) {
         LOGE("Tipo de dado inválido");
         g_scanRunning = false;
@@ -279,7 +289,6 @@ static void scanThread(jobject callbackObj, long long value, int type, int condi
     size_t targetSize = targetBytes.size();
 
     std::vector<ScanResult> newResults;
-    // Pré-alocação para evitar realocações
     newResults.reserve(isNext ? g_results.size() : 10000);
 
     if (!isNext) {
@@ -297,19 +306,15 @@ static void scanThread(jobject callbackObj, long long value, int type, int condi
             while (addr < reg.end && !g_scanCancelled.load()) {
                 size_t remaining = reg.end - addr;
                 size_t readSize = std::min(BLOCK_SIZE, remaining);
-                // Garantir que leiamos pelo menos targetSize
-                if (readSize < targetSize) {
-                    // Se o bloco restante for menor que targetSize, podemos tentar ler diretamente
-                    // Mas para simplificar, ajustamos para ler o mínimo necessário
-                    readSize = targetSize;
-                }
+                // Garantir que a leitura não ultrapasse o limite da região
+                if (readSize < targetSize) break; // Não há espaço suficiente para o alvo
+
                 if (!readMemory(addr, block.data(), readSize)) {
-                    // Falha na leitura, pula para a próxima página (alinhada)
                     addr += sysconf(_SC_PAGE_SIZE);
                     continue;
                 }
-                // Comparar cada posição dentro do bloco
-                for (size_t offset = 0; offset + targetSize <= readSize; offset += targetSize) {
+                // Comparar cada posição dentro do bloco (byte a byte)
+                for (size_t offset = 0; offset + targetSize <= readSize; offset++) {
                     if (g_scanCancelled.load()) break;
                     size_t sizeCheck = 0;
                     if (compareValue(block.data() + offset, targetBytes.data(), type, condition, sizeCheck)) {
@@ -392,22 +397,17 @@ static void scanThread(jobject callbackObj, long long value, int type, int condi
 static void freezeLoop() {
     std::unique_lock<std::mutex> lock(g_freezeCvMutex);
     while (g_freezeRunning) {
-        // Aguarda até que haja itens congelados ou sinal de parada
         g_freezeCv.wait_for(lock, std::chrono::milliseconds(100), []{
             return !g_freezeRunning || !g_frozen.empty();
         });
         if (!g_freezeRunning) break;
-        if (g_frozen.empty()) {
-            // Se estiver vazio, continua esperando
-            continue;
-        }
-        // Copia os itens congelados para evitar segurar o mutex durante a escrita
+        if (g_frozen.empty()) continue;
+
         std::unordered_map<uintptr_t, std::pair<std::vector<uint8_t>, int>> frozenCopy;
         {
             std::shared_lock<std::shared_mutex> lock(g_frozenMutex);
             frozenCopy = g_frozen;
         }
-        // Escreve cada endereço
         for (const auto& entry : frozenCopy) {
             writeMemory(entry.first, entry.second.first.data(), entry.second.first.size());
         }
@@ -417,14 +417,13 @@ static void freezeLoop() {
 // ======================== JNI IMPLEMENTATIONS ========================
 
 JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeStartScan(
-    JNIEnv* env, jobject thiz, jint value, jint type, jint condition) {
+    JNIEnv* env, jobject thiz, jlong value, jint type, jint condition) {
 
     if (g_scanRunning.load()) {
         LOGE("Scan já em execução");
         return;
     }
 
-    // Guarda callback
     if (g_callbackObj == nullptr) {
         g_callbackObj = env->NewGlobalRef(thiz);
         jclass cls = env->GetObjectClass(thiz);
@@ -448,7 +447,7 @@ JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeStart
 }
 
 JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeNextScan(
-    JNIEnv* env, jobject thiz, jint value, jint condition) {
+    JNIEnv* env, jobject thiz, jlong value, jint condition) {
 
     if (g_scanRunning.load()) {
         LOGE("Scan já em execução");
@@ -462,7 +461,6 @@ JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeNextS
         }
     }
 
-    // Usa o tipo do primeiro resultado (assume que todos têm o mesmo tipo)
     int type;
     {
         std::shared_lock<std::shared_mutex> lock(g_resultsMutex);
@@ -485,7 +483,6 @@ JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeCance
 
 JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeClearResults(
     JNIEnv* env, jobject thiz) {
-    // Para o freeze
     {
         std::unique_lock<std::shared_mutex> lock(g_frozenMutex);
         g_frozen.clear();
@@ -500,8 +497,6 @@ JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeClear
     if (g_freezeThread.joinable()) {
         g_freezeThread.join();
     }
-
-    // Limpa resultados
     {
         std::unique_lock<std::shared_mutex> lock(g_resultsMutex);
         g_results.clear();
@@ -525,7 +520,6 @@ JNIEXPORT jlongArray JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativ
 
 JNIEXPORT jboolean JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeWriteMemory(
     JNIEnv* env, jobject thiz, jlong address, jbyteArray data) {
-
     jsize len = env->GetArrayLength(data);
     jbyte* bytes = env->GetByteArrayElements(data, nullptr);
     bool ok = writeMemory((uintptr_t)address, bytes, len);
@@ -534,16 +528,24 @@ JNIEXPORT jboolean JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeW
 }
 
 JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeToggleFreeze(
-    JNIEnv* env, jobject thiz, jlong address, jint value, jint type, jboolean enable) {
+    JNIEnv* env, jobject thiz, jlong address, jlong value, jint type, jboolean enable) {
 
     std::unique_lock<std::shared_mutex> lock(g_frozenMutex);
     uintptr_t addr = (uintptr_t)address;
 
     if (enable) {
-        std::vector<uint8_t> bytes = intToBytes(value, type);
+        std::vector<uint8_t> bytes;
+        if (type == TYPE_FLOAT) {
+            float f = (float)value;
+            bytes.assign((uint8_t*)&f, (uint8_t*)&f + 4);
+        } else if (type == TYPE_DOUBLE) {
+            double d = (double)value;
+            bytes.assign((uint8_t*)&d, (uint8_t*)&d + 8);
+        } else {
+            bytes = intToBytes(value, type);
+        }
         if (bytes.empty()) return;
         g_frozen[addr] = {bytes, type};
-        // Inicia thread de freeze se não estiver rodando
         if (!g_freezeRunning) {
             g_freezeRunning = true;
             if (g_freezeThread.joinable()) {
@@ -555,7 +557,6 @@ JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeToggl
     } else {
         g_frozen.erase(addr);
         if (g_frozen.empty() && g_freezeRunning) {
-            // Avisa a thread para parar
             std::unique_lock<std::mutex> cvLock(g_freezeCvMutex);
             g_freezeRunning = false;
             g_freezeCv.notify_all();
@@ -565,7 +566,6 @@ JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeToggl
 
 JNIEXPORT jbyteArray JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeReadMemory(
     JNIEnv* env, jobject thiz, jlong address, jint size) {
-
     jbyteArray arr = env->NewByteArray(size);
     if (!arr) return nullptr;
     jbyte* bytes = env->GetByteArrayElements(arr, nullptr);

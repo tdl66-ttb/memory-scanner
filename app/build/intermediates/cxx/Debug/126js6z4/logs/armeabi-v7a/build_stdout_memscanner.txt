@@ -1,46 +1,46 @@
-ninja: Entering directory `/workspaces/memory-scanner/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a'
+ninja: Entering directory `/workspaces/memory-scanner/app/.cxx/Debug/126js6z4/armeabi-v7a'
 [1/2] Building CXX object CMakeFiles/memscanner.dir/memscanner.cpp.o
-/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/memscanner.cpp:372:34: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned int') and 'jsize' (aka 'int') [-Wsign-compare]
+/workspaces/memory-scanner/app/src/main/cpp/memscanner.cpp:377:34: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned int') and 'jsize' (aka 'int') [-Wsign-compare]
             for (size_t i = 0; i < count; ++i) {
                                ~ ^ ~~~~~
-/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/memscanner.cpp:451:13: warning: unused parameter 'env' [-Wunused-parameter]
-    JNIEnv* env, jobject thiz, jint value, jint condition) {
+/workspaces/memory-scanner/app/src/main/cpp/memscanner.cpp:450:13: warning: unused parameter 'env' [-Wunused-parameter]
+    JNIEnv* env, jobject thiz, jlong value, jint condition) {
             ^
-/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/memscanner.cpp:451:26: warning: unused parameter 'thiz' [-Wunused-parameter]
-    JNIEnv* env, jobject thiz, jint value, jint condition) {
+/workspaces/memory-scanner/app/src/main/cpp/memscanner.cpp:450:26: warning: unused parameter 'thiz' [-Wunused-parameter]
+    JNIEnv* env, jobject thiz, jlong value, jint condition) {
                          ^
-/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/memscanner.cpp:482:13: warning: unused parameter 'env' [-Wunused-parameter]
-    JNIEnv* env, jobject thiz) {
-            ^
-/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/memscanner.cpp:482:26: warning: unused parameter 'thiz' [-Wunused-parameter]
-    JNIEnv* env, jobject thiz) {
-                         ^
-/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/memscanner.cpp:487:13: warning: unused parameter 'env' [-Wunused-parameter]
+/workspaces/memory-scanner/app/src/main/cpp/memscanner.cpp:480:13: warning: unused parameter 'env' [-Wunused-parameter]
     JNIEnv* env, jobject thiz) {
             ^
-/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/memscanner.cpp:487:26: warning: unused parameter 'thiz' [-Wunused-parameter]
+/workspaces/memory-scanner/app/src/main/cpp/memscanner.cpp:480:26: warning: unused parameter 'thiz' [-Wunused-parameter]
     JNIEnv* env, jobject thiz) {
                          ^
-/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/memscanner.cpp:512:26: warning: unused parameter 'thiz' [-Wunused-parameter]
+/workspaces/memory-scanner/app/src/main/cpp/memscanner.cpp:485:13: warning: unused parameter 'env' [-Wunused-parameter]
+    JNIEnv* env, jobject thiz) {
+            ^
+/workspaces/memory-scanner/app/src/main/cpp/memscanner.cpp:485:26: warning: unused parameter 'thiz' [-Wunused-parameter]
     JNIEnv* env, jobject thiz) {
                          ^
-/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/memscanner.cpp:518:30: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned int') and 'jsize' (aka 'int') [-Wsign-compare]
+/workspaces/memory-scanner/app/src/main/cpp/memscanner.cpp:507:26: warning: unused parameter 'thiz' [-Wunused-parameter]
+    JNIEnv* env, jobject thiz) {
+                         ^
+/workspaces/memory-scanner/app/src/main/cpp/memscanner.cpp:513:30: warning: comparison of integers of different signs: 'size_t' (aka 'unsigned int') and 'jsize' (aka 'int') [-Wsign-compare]
         for (size_t i = 0; i < count; ++i) {
                            ~ ^ ~~~~~
-/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/memscanner.cpp:527:26: warning: unused parameter 'thiz' [-Wunused-parameter]
+/workspaces/memory-scanner/app/src/main/cpp/memscanner.cpp:522:26: warning: unused parameter 'thiz' [-Wunused-parameter]
     JNIEnv* env, jobject thiz, jlong address, jbyteArray data) {
                          ^
-/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/memscanner.cpp:537:13: warning: unused parameter 'env' [-Wunused-parameter]
-    JNIEnv* env, jobject thiz, jlong address, jint value, jint type, jboolean enable) {
+/workspaces/memory-scanner/app/src/main/cpp/memscanner.cpp:531:13: warning: unused parameter 'env' [-Wunused-parameter]
+    JNIEnv* env, jobject thiz, jlong address, jlong value, jint type, jboolean enable) {
             ^
-/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/memscanner.cpp:537:26: warning: unused parameter 'thiz' [-Wunused-parameter]
-    JNIEnv* env, jobject thiz, jlong address, jint value, jint type, jboolean enable) {
+/workspaces/memory-scanner/app/src/main/cpp/memscanner.cpp:531:26: warning: unused parameter 'thiz' [-Wunused-parameter]
+    JNIEnv* env, jobject thiz, jlong address, jlong value, jint type, jboolean enable) {
                          ^
-/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/memscanner.cpp:567:26: warning: unused parameter 'thiz' [-Wunused-parameter]
+/workspaces/memory-scanner/app/src/main/cpp/memscanner.cpp:568:26: warning: unused parameter 'thiz' [-Wunused-parameter]
     JNIEnv* env, jobject thiz, jlong address, jint size) {
                          ^
-/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/memscanner.cpp:577:53: warning: unused parameter 'reserved' [-Wunused-parameter]
+/workspaces/memory-scanner/app/src/main/cpp/memscanner.cpp:577:53: warning: unused parameter 'reserved' [-Wunused-parameter]
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
                                                     ^
 14 warnings generated.
-[2/2] Linking CXX shared library /workspaces/memory-scanner/memory-scanner/app/build/intermediates/cxx/Debug/126js6z4/obj/armeabi-v7a/libmemscanner.so
+[2/2] Linking CXX shared library /workspaces/memory-scanner/app/build/intermediates/cxx/Debug/126js6z4/obj/armeabi-v7a/libmemscanner.so

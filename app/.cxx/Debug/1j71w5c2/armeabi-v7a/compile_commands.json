@@ -1,7 +1,0 @@
-[
-{
-  "directory": "/workspaces/memory-scanner/memory-scanner/app/.cxx/Debug/1j71w5c2/armeabi-v7a",
-  "command": "/home/codespace/Android/Sdk/ndk/23.1.7779620/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ --target=armv7-none-linux-androideabi21 --sysroot=/home/codespace/Android/Sdk/ndk/23.1.7779620/toolchains/llvm/prebuilt/linux-x86_64/sysroot -Dmemscanner_EXPORTS -std=c++11 -fPIC -g  -fno-limit-debug-info -fPIC -o CMakeFiles/memscanner.dir/memscanner.cpp.o -c /workspaces/memory-scanner/memory-scanner/app/src/main/cpp/memscanner.cpp",
-  "file": "/workspaces/memory-scanner/memory-scanner/app/src/main/cpp/memscanner.cpp"
-}
-]
