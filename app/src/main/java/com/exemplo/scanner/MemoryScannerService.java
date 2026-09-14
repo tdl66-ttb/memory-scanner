@@ -19,7 +19,17 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
-import android.widget.*;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ListView;
+import android.widget.ProgressBar;
+import android.widget.Spinner;
+import android.widget.TextView;
+import android.widget.Toast;
+
 import androidx.core.app.NotificationCompat;
 
 import java.io.BufferedReader;
@@ -37,6 +47,14 @@ public class MemoryScannerService extends Service
     private static final String CHANNEL_ID = "memory_scanner_channel";
     private static final int NOTIFICATION_ID = 1001;
 
+    // Constantes de tipo (espelham os enum do C++)
+    private static final int TYPE_BYTE   = 0;
+    private static final int TYPE_SHORT  = 1;
+    private static final int TYPE_INT    = 2;
+    private static final int TYPE_LONG   = 3;
+    private static final int TYPE_FLOAT  = 4;
+    private static final int TYPE_DOUBLE = 5;
+
     private WindowManager wm;
     private View bubbleView, panelView;
     private WindowManager.LayoutParams bubbleParams, panelParams;
@@ -46,7 +64,8 @@ public class MemoryScannerService extends Service
     private TextView tvTitle, tvStatus;
     private EditText editValue;
     private Spinner spinnerType, spinnerCondition;
-    private Button btnScan, btnNext, btnWrite, btnFreeze, btnClear, btnCancel, btnClose, btnCloseService, btnSave, btnLoad;
+    private Button btnScan, btnNext, btnWrite, btnFreeze, btnClear, btnCancel,
+                   btnClose, btnCloseService, btnSave, btnLoad;
     private ArrayAdapter<String> adapter;
     private List<String> displayItems = new ArrayList<>();
     private ProgressBar progressBar;
@@ -60,16 +79,17 @@ public class MemoryScannerService extends Service
         System.loadLibrary("memscanner");
     }
 
-    // Métodos nativos com assinaturas corrigidas para 64 bits
-    public native void nativeStartScan(long value, int type, int condition);
-    public native void nativeNextScan(long value, int condition);
-    public native void nativeCancelScan();
-    public native void nativeClearResults();
-    public native long[] nativeGetResults();
+    // ==================== Métodos nativos ====================
+    public native void    nativeStartScan(long value, int type, int condition);
+    public native void    nativeNextScan(long value, int condition);
+    public native void    nativeCancelScan();
+    public native void    nativeClearResults();
+    public native long[]  nativeGetResults();
     public native boolean nativeWriteMemory(long address, byte[] data);
-    public native void nativeToggleFreeze(long address, long value, int type, boolean enable);
-    public native byte[] nativeReadMemory(long address, int size);
+    public native void    nativeToggleFreeze(long address, long value, int type, boolean enable);
+    public native byte[]  nativeReadMemory(long address, int size);
 
+    // ==================== Ciclo de vida ====================
     @Override
     public void onCreate() {
         super.onCreate();
@@ -94,10 +114,12 @@ public class MemoryScannerService extends Service
     public void onDestroy() {
         super.onDestroy();
         MemoryScanner.getInstance().clearCallback();
-        if (bubbleView != null && bubbleView.getWindowToken() != null)
-            wm.removeView(bubbleView);
-        if (panelView != null && panelView.getWindowToken() != null)
-            wm.removeView(panelView);
+        try {
+            if (bubbleView != null && bubbleView.getWindowToken() != null)
+                wm.removeView(bubbleView);
+            if (panelView != null && panelView.getWindowToken() != null)
+                wm.removeView(panelView);
+        } catch (Exception ignored) {}
         nativeCancelScan();
         nativeClearResults();
         stopForeground(true);
@@ -111,9 +133,7 @@ public class MemoryScannerService extends Service
                     NotificationManager.IMPORTANCE_LOW);
             channel.setDescription("Mantém o serviço em execução");
             NotificationManager manager = getSystemService(NotificationManager.class);
-            if (manager != null) {
-                manager.createNotificationChannel(channel);
-            }
+            if (manager != null) manager.createNotificationChannel(channel);
         }
     }
 
@@ -126,8 +146,7 @@ public class MemoryScannerService extends Service
                 .build();
     }
 
-    // ======================== INTERFACE ========================
-
+    // ==================== Interface flutuante ====================
     private void createBubble() {
         TextView bubble = new TextView(this);
         bubble.setText("🔍");
@@ -207,7 +226,6 @@ public class MemoryScannerService extends Service
         root.setBackgroundColor(0xEE222222);
         root.setElevation(10f);
 
-        // Título
         tvTitle = new TextView(this);
         tvTitle.setTextSize(18f);
         tvTitle.setTextColor(0xFFFFFFFF);
@@ -215,7 +233,6 @@ public class MemoryScannerService extends Service
         tvTitle.setText("Memory Scanner");
         root.addView(tvTitle);
 
-        // Barra de arrasto e fechamento
         LinearLayout dragBar = new LinearLayout(this);
         dragBar.setOrientation(LinearLayout.HORIZONTAL);
         dragBar.setBackgroundColor(0xFF333333);
@@ -234,14 +251,12 @@ public class MemoryScannerService extends Service
         dragBar.addView(btnClose);
         root.addView(dragBar);
 
-        // Status
         tvStatus = new TextView(this);
         tvStatus.setTextColor(0xFFFFFFFF);
         tvStatus.setPadding(8, 8, 8, 8);
         tvStatus.setText("Pronto");
         root.addView(tvStatus);
 
-        // Input: Valor
         LinearLayout row1 = new LinearLayout(this);
         row1.setOrientation(LinearLayout.HORIZONTAL);
         row1.setPadding(0, 8, 0, 8);
@@ -259,7 +274,6 @@ public class MemoryScannerService extends Service
         row1.addView(editValue, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         root.addView(row1);
 
-        // Tipo e condição
         LinearLayout row2 = new LinearLayout(this);
         row2.setOrientation(LinearLayout.HORIZONTAL);
         row2.setPadding(0, 4, 0, 4);
@@ -270,7 +284,8 @@ public class MemoryScannerService extends Service
         row2.addView(lblTipo);
         spinnerType = new Spinner(this);
         String[] types = {"Byte", "Short", "Int", "Long", "Float", "Double"};
-        ArrayAdapter<String> typeAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, types);
+        ArrayAdapter<String> typeAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, types);
         typeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinnerType.setAdapter(typeAdapter);
         spinnerType.setSelection(2);
@@ -283,13 +298,13 @@ public class MemoryScannerService extends Service
         row2.addView(lblCond);
         spinnerCondition = new Spinner(this);
         String[] conds = {"Exato", "Maior", "Menor"};
-        ArrayAdapter<String> condAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, conds);
+        ArrayAdapter<String> condAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, conds);
         condAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinnerCondition.setAdapter(condAdapter);
         row2.addView(spinnerCondition, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.4f));
         root.addView(row2);
 
-        // Botões de scan
         LinearLayout scanBar = new LinearLayout(this);
         scanBar.setOrientation(LinearLayout.HORIZONTAL);
         scanBar.setPadding(0, 8, 0, 8);
@@ -308,7 +323,6 @@ public class MemoryScannerService extends Service
         scanBar.addView(btnCancel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         root.addView(scanBar);
 
-        // Botões de ação
         LinearLayout actionBar = new LinearLayout(this);
         actionBar.setOrientation(LinearLayout.HORIZONTAL);
         actionBar.setPadding(0, 4, 0, 8);
@@ -326,7 +340,6 @@ public class MemoryScannerService extends Service
         actionBar.addView(btnClear, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         root.addView(actionBar);
 
-        // Botões extras: salvar/carregar
         LinearLayout extraBar = new LinearLayout(this);
         extraBar.setOrientation(LinearLayout.HORIZONTAL);
         btnSave = new Button(this);
@@ -343,7 +356,6 @@ public class MemoryScannerService extends Service
         progressBar.setVisibility(View.GONE);
         root.addView(progressBar);
 
-        // ListView
         listView = new ListView(this);
         listView.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 500));
@@ -370,8 +382,7 @@ public class MemoryScannerService extends Service
         makeDraggable(dragLabel, panelParams, () -> {});
     }
 
-    // ======================== EVENTOS ========================
-
+    // ==================== Eventos de clique ====================
     @Override
     public void onClick(View v) {
         if (v == btnClose) {
@@ -403,11 +414,11 @@ public class MemoryScannerService extends Service
 
     @Override
     public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-        listView.setItemChecked(position, !listView.isItemChecked(position));
+        // Com CHOICE_MODE_MULTIPLE, o ListView JÁ alterna o estado do checkbox.
+        // Não fazer nada aqui evita o toggle duplo que anulava a seleção.
     }
 
-    // ======================== LÓGICA INTERNA ========================
-
+    // ==================== Lógica de scan ====================
     private void startScanInternal() {
         if (!validateInput()) return;
         long value = parseValue();
@@ -420,6 +431,7 @@ public class MemoryScannerService extends Service
         progressBar.setIndeterminate(false);
         progressBar.setProgress(0);
 
+        Log.i(TAG, String.format("startScan valor=%d tipo=%d cond=%d", value, type, condition));
         nativeStartScan(value, type, condition);
     }
 
@@ -434,6 +446,7 @@ public class MemoryScannerService extends Service
         progressBar.setIndeterminate(false);
         progressBar.setProgress(0);
 
+        Log.i(TAG, String.format("nextScan valor=%d cond=%d", value, condition));
         nativeNextScan(value, condition);
     }
 
@@ -441,9 +454,7 @@ public class MemoryScannerService extends Service
         SparseBooleanArray checked = listView.getCheckedItemPositions();
         List<Integer> positions = new ArrayList<>();
         for (int i = 0; i < checked.size(); i++) {
-            if (checked.valueAt(i)) {
-                positions.add(checked.keyAt(i));
-            }
+            if (checked.valueAt(i)) positions.add(checked.keyAt(i));
         }
         return positions;
     }
@@ -456,20 +467,23 @@ public class MemoryScannerService extends Service
         }
         if (!validateInput()) return;
         int type = spinnerType.getSelectedItemPosition();
-        byte[] data = convertValueToBytes(parseValue(), type);
+        long value = parseValue();
+        byte[] data = convertValueToBytes(value, type);
         if (data == null) {
             toast("Erro na conversão do valor");
             return;
         }
 
+        int okCount = 0;
         for (int pos : positions) {
+            if (pos < 0 || pos >= displayItems.size()) continue;
             String item = displayItems.get(pos);
             long addr = extractAddress(item);
             if (addr != -1) {
-                nativeWriteMemory(addr, data);
+                if (nativeWriteMemory(addr, data)) okCount++;
             }
         }
-        toast("Escrita concluída para " + positions.size() + " endereço(s)");
+        toast("Escrita OK em " + okCount + "/" + positions.size() + " endereço(s)");
         refreshDisplayValues();
     }
 
@@ -484,6 +498,7 @@ public class MemoryScannerService extends Service
         long value = parseValue();
 
         for (int pos : positions) {
+            if (pos < 0 || pos >= displayItems.size()) continue;
             String item = displayItems.get(pos);
             long addr = extractAddress(item);
             if (addr != -1) {
@@ -495,15 +510,14 @@ public class MemoryScannerService extends Service
 
     private void refreshDisplayValues() {
         List<String> newItems = new ArrayList<>();
+        int type = spinnerType.getSelectedItemPosition();
+        int size = getTypeSize(type);
         for (String item : displayItems) {
             long addr = extractAddress(item);
             if (addr != -1) {
-                int type = spinnerType.getSelectedItemPosition();
-                byte[] data = nativeReadMemory(addr, getTypeSize(type));
+                byte[] data = nativeReadMemory(addr, size);
                 if (data != null) {
-                    String hexAddr = String.format("0x%08X", addr);
-                    String val = bytesToHex(data);
-                    newItems.add(hexAddr + "  " + val);
+                    newItems.add(String.format("0x%08X  %s", addr, bytesToHex(data)));
                 } else {
                     newItems.add(item);
                 }
@@ -518,13 +532,13 @@ public class MemoryScannerService extends Service
 
     private int getTypeSize(int type) {
         switch (type) {
-            case TYPE_BYTE: return 1;
-            case TYPE_SHORT: return 2;
-            case TYPE_INT: return 4;
-            case TYPE_LONG: return 8;
-            case TYPE_FLOAT: return 4;
+            case TYPE_BYTE:   return 1;
+            case TYPE_SHORT:  return 2;
+            case TYPE_INT:    return 4;
+            case TYPE_LONG:   return 8;
+            case TYPE_FLOAT:  return 4;
             case TYPE_DOUBLE: return 8;
-            default: return 4;
+            default:          return 4;
         }
     }
 
@@ -535,62 +549,50 @@ public class MemoryScannerService extends Service
             return false;
         }
         int type = spinnerType.getSelectedItemPosition();
-        if (type == TYPE_FLOAT || type == TYPE_DOUBLE) {
-            try {
+        try {
+            if (type == TYPE_FLOAT) {
+                Float.parseFloat(val);
+            } else if (type == TYPE_DOUBLE) {
                 Double.parseDouble(val);
-            } catch (NumberFormatException e) {
-                toast("Valor inválido para float/double");
-                return false;
-            }
-        } else {
-            try {
+            } else {
                 Long.parseLong(val);
-            } catch (NumberFormatException e) {
-                toast("Valor inteiro inválido");
-                return false;
             }
+        } catch (NumberFormatException e) {
+            toast("Valor inválido para o tipo selecionado");
+            return false;
         }
         return true;
     }
 
+    /**
+     * Converte o texto digitado para bits crus (64 bits) conforme o tipo.
+     *  - FLOAT : retorna os 32 bits do float nos bits baixos do long
+     *  - DOUBLE: retorna os 64 bits do double
+     *  - inteiros: valor direto
+     */
     private long parseValue() {
         String val = editValue.getText().toString().trim();
         int type = spinnerType.getSelectedItemPosition();
-        if (type == TYPE_FLOAT || type == TYPE_DOUBLE) {
+        if (type == TYPE_FLOAT) {
+            float f = Float.parseFloat(val);
+            return Float.floatToRawIntBits(f) & 0xFFFFFFFFL;
+        } else if (type == TYPE_DOUBLE) {
             double d = Double.parseDouble(val);
-            return Double.doubleToLongBits(d); // Converte para bits de 64 bits
+            return Double.doubleToRawLongBits(d);
         } else {
-            return Long.parseLong(val); // Retorna long de 64 bits
+            return Long.parseLong(val);
         }
     }
 
+    /**
+     * Empacota o valor (já como bits) no array de bytes little-endian do tamanho do tipo.
+     */
     private byte[] convertValueToBytes(long value, int type) {
-        byte[] data = null;
-        switch (type) {
-            case TYPE_BYTE:
-                data = new byte[]{(byte) value};
-                break;
-            case TYPE_SHORT:
-                data = new byte[2];
-                for (int i = 0; i < 2; i++) data[i] = (byte) ((value >> (i * 8)) & 0xFF);
-                break;
-            case TYPE_INT:
-                data = new byte[4];
-                for (int i = 0; i < 4; i++) data[i] = (byte) ((value >> (i * 8)) & 0xFF);
-                break;
-            case TYPE_LONG:
-                data = new byte[8];
-                for (int i = 0; i < 8; i++) data[i] = (byte) ((value >> (i * 8)) & 0xFF);
-                break;
-            case TYPE_FLOAT:
-                data = new byte[4];
-                int intVal = (int) value;
-                for (int i = 0; i < 4; i++) data[i] = (byte) ((intVal >> (i * 8)) & 0xFF);
-                break;
-            case TYPE_DOUBLE:
-                data = new byte[8];
-                for (int i = 0; i < 8; i++) data[i] = (byte) ((value >> (i * 8)) & 0xFF);
-                break;
+        int size = getTypeSize(type);
+        if (size <= 0) return null;
+        byte[] data = new byte[size];
+        for (int i = 0; i < size; i++) {
+            data[i] = (byte) ((value >> (i * 8)) & 0xFF);
         }
         return data;
     }
@@ -610,22 +612,21 @@ public class MemoryScannerService extends Service
     }
 
     private void setStatus(String msg) {
-        tvStatus.setText(msg);
+        if (tvStatus != null) tvStatus.setText(msg);
     }
 
-    // ======================== CALLBACKS JNI ========================
-
+    // ==================== Callbacks JNI ====================
     public void onScanProgress(final int percent) {
         new Handler(Looper.getMainLooper()).post(() -> {
-            progressBar.setProgress(percent);
+            if (progressBar != null) progressBar.setProgress(percent);
             setStatus("Scanneando... " + percent + "%");
         });
     }
 
     public void onScanComplete(final long[] addresses, final byte[][] values) {
         new Handler(Looper.getMainLooper()).post(() -> {
-            progressBar.setVisibility(View.GONE);
-            btnCancel.setEnabled(false);
+            if (progressBar != null) progressBar.setVisibility(View.GONE);
+            if (btnCancel != null) btnCancel.setEnabled(false);
             displayItems.clear();
 
             if (addresses != null) {
@@ -635,31 +636,26 @@ public class MemoryScannerService extends Service
                     displayItems.add(hex + "  " + val);
                 }
             }
-            adapter.notifyDataSetChanged();
-            tvTitle.setText("Endereços: " + displayItems.size());
+            if (adapter != null) adapter.notifyDataSetChanged();
+            if (tvTitle != null) tvTitle.setText("Endereços: " + displayItems.size());
             setStatus("Scan concluído - " + displayItems.size() + " resultados");
         });
     }
 
     private String bytesToHex(byte[] bytes) {
         StringBuilder sb = new StringBuilder();
-        for (byte b : bytes) {
-            sb.append(String.format("%02X", b));
-        }
+        for (byte b : bytes) sb.append(String.format("%02X", b));
         return sb.toString();
     }
 
-    // ======================== SALVAR/CARREGAR ========================
-
+    // ==================== Salvar / carregar ====================
     private void saveResultsToFile() {
         try {
             File file = new File(getFilesDir(), "results.txt");
             FileWriter fw = new FileWriter(file);
-            for (String item : displayItems) {
-                fw.write(item + "\n");
-            }
+            for (String item : displayItems) fw.write(item + "\n");
             fw.close();
-            toast("Resultados salvos em " + file.getAbsolutePath());
+            toast("Salvos em " + file.getAbsolutePath());
         } catch (IOException e) {
             Log.e(TAG, "Erro ao salvar", e);
             toast("Erro ao salvar: " + e.getMessage());
@@ -676,30 +672,18 @@ public class MemoryScannerService extends Service
             BufferedReader br = new BufferedReader(new FileReader(file));
             displayItems.clear();
             String line;
-            while ((line = br.readLine()) != null) {
-                displayItems.add(line);
-            }
+            while ((line = br.readLine()) != null) displayItems.add(line);
             br.close();
             adapter.notifyDataSetChanged();
             tvTitle.setText("Endereços: " + displayItems.size());
-            toast("Resultados carregados: " + displayItems.size() + " endereços");
+            toast("Carregados " + displayItems.size() + " endereços");
         } catch (IOException e) {
             Log.e(TAG, "Erro ao carregar", e);
             toast("Erro ao carregar: " + e.getMessage());
         }
     }
 
-    // ======================== CONSTANTES ========================
-
-    private static final int TYPE_BYTE = 0;
-    private static final int TYPE_SHORT = 1;
-    private static final int TYPE_INT = 2;
-    private static final int TYPE_LONG = 3;
-    private static final int TYPE_FLOAT = 4;
-    private static final int TYPE_DOUBLE = 5;
-
-    // ======================== MÉTODOS PÚBLICOS ========================
-
+    // ==================== API pública ====================
     public static void start(Context context) {
         context.startService(new Intent(context, MemoryScannerService.class));
     }

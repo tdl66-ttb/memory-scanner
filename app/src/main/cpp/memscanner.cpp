@@ -1,7 +1,7 @@
 // ============================================================
 //  memscanner.cpp
 //  Memory Scanner - parte nativa (JNI)
-//  Versão impecável - leitura direta com recuperação de SIGSEGV
+//  Versão paralela + otimizada para 32-bit ARM
 // ============================================================
 
 #include "memscanner.h"
@@ -16,6 +16,7 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 #include <atomic>
 #include <thread>
 #include <mutex>
@@ -116,10 +117,10 @@ static jmethodID  g_onProgressMethod  = nullptr;
 static jmethodID  g_onCompleteMethod  = nullptr;
 
 // ============================================================
-//  Infraestrutura de SIGSEGV / SIGBUS para leitura direta
+//  SIGSEGV / SIGBUS: leitura direta com recuperação
 // ============================================================
 static __thread sigjmp_buf              t_jmpBuf;
-static __thread volatile sig_atomic_t   t_inSafeRead    = 0;
+static __thread volatile sig_atomic_t   t_inSafeRead = 0;
 
 static struct sigaction g_oldSegvAction;
 static struct sigaction g_oldBusAction;
@@ -129,11 +130,9 @@ static std::atomic<bool> g_sigHandlersInstalled{false};
 
 static void memScannerFaultHandler(int sig, siginfo_t* info, void* ctx) {
     if (t_inSafeRead) {
-        // A nossa leitura segura detectou acesso inválido: volta pro ponto seguro
         siglongjmp(t_jmpBuf, 1);
     }
 
-    // Não foi nosso: repassa para o handler anterior (Unity/ART/etc.)
     struct sigaction* old = nullptr;
     if (sig == SIGBUS) {
         if (g_haveOldBusAction) old = &g_oldBusAction;
@@ -154,18 +153,13 @@ static void memScannerFaultHandler(int sig, siginfo_t* info, void* ctx) {
             }
         }
     }
-
-    // Fallback: comportamento padrão (crash legítimo)
     signal(sig, SIG_DFL);
     raise(sig);
 }
 
 static void installSigHandlers() {
     bool expected = false;
-    if (!g_sigHandlersInstalled.compare_exchange_strong(expected, true)) {
-        LOGD("[INIT] Signal handlers já estavam instalados");
-        return;
-    }
+    if (!g_sigHandlersInstalled.compare_exchange_strong(expected, true)) return;
 
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -177,14 +171,14 @@ static void installSigHandlers() {
         g_haveOldSegvAction = true;
         LOGI("[INIT] SIGSEGV handler instalado");
     } else {
-        LOGE("[INIT] Falha ao instalar SIGSEGV handler: %s", strerror(errno));
+        LOGE("[INIT] Falha SIGSEGV: %s", strerror(errno));
     }
 
     if (sigaction(SIGBUS, &sa, &g_oldBusAction) == 0) {
         g_haveOldBusAction = true;
         LOGI("[INIT] SIGBUS handler instalado");
     } else {
-        LOGW("[INIT] Falha ao instalar SIGBUS handler: %s", strerror(errno));
+        LOGW("[INIT] Falha SIGBUS: %s", strerror(errno));
     }
 }
 
@@ -196,27 +190,19 @@ public:
     explicit JniThreadAttacher(JavaVM* vm)
         : m_vm(vm), m_env(nullptr), m_attached(false) {
         if (m_vm->GetEnv((void**)&m_env, JNI_VERSION_1_6) == JNI_OK) {
-            LOGD("[JNI] Thread já anexada");
+            // já anexado
         } else {
             if (m_vm->AttachCurrentThread(&m_env, nullptr) == JNI_OK) {
                 m_attached = true;
-                LOGD("[JNI] Thread anexada");
             } else {
                 m_env = nullptr;
-                LOGE("[JNI] Falha ao anexar thread");
             }
         }
     }
-
     ~JniThreadAttacher() {
-        if (m_attached && m_env) {
-            m_vm->DetachCurrentThread();
-            LOGD("[JNI] Thread desanexada");
-        }
+        if (m_attached && m_env) m_vm->DetachCurrentThread();
     }
-
     JNIEnv* getEnv() const { return m_env; }
-
 private:
     JavaVM* m_vm;
     JNIEnv* m_env;
@@ -227,11 +213,10 @@ private:
 //  parseMaps
 // ============================================================
 static std::vector<MemoryRegion> parseMaps() {
-    LOGD("[MAPS] Abrindo /proc/self/maps");
     std::vector<MemoryRegion> regions;
     std::ifstream maps("/proc/self/maps");
     if (!maps.is_open()) {
-        LOGE("[MAPS] Falha ao abrir /proc/self/maps (errno=%d: %s)", errno, strerror(errno));
+        LOGE("[MAPS] Falha open /proc/self/maps (errno=%d)", errno);
         return regions;
     }
 
@@ -251,16 +236,19 @@ static std::vector<MemoryRegion> parseMaps() {
         std::getline(iss, path);
         if (!path.empty() && path[0] == ' ') path.erase(0, 1);
 
+        // Pula só o que é sabidamente inútil
         if (path.find("[vsyscall]") != std::string::npos ||
             path.find("[vvar]")     != std::string::npos ||
             path.find("[vdso]")     != std::string::npos ||
-            path.find("libmemscanner.so") != std::string::npos) {
+            path.find("libmemscanner.so") != std::string::npos ||
+            path.find("/dev/kgsl")  != std::string::npos ||
+            path.find("/dev/mali")  != std::string::npos) {
             skippedSpecial++;
             continue;
         }
 
         if (perms.size() < 3 || perms[0] != 'r' || end <= start ||
-            (end - start) > (uintptr_t)1024 * 1024 * 1024) {
+            (end - start) > (uintptr_t)512 * 1024 * 1024) {
             skippedNotReadable++;
             continue;
         }
@@ -276,27 +264,20 @@ static std::vector<MemoryRegion> parseMaps() {
         accepted++;
     }
 
+    // Ordena por tamanho decrescente (regiões grandes primeiro = melhor balanceamento)
+    std::sort(regions.begin(), regions.end(),
+              [](const MemoryRegion& a, const MemoryRegion& b) {
+                  return (a.end - a.start) > (b.end - b.start);
+              });
+
     LOGI("[MAPS] Linhas=%d | aceitas=%d | puladas(esp)=%d | puladas(não-legíveis)=%d",
          lineNum, accepted, skippedSpecial, skippedNotReadable);
-
-    size_t n = regions.size() < 15 ? regions.size() : 15;
-    for (size_t i = 0; i < n; i++) {
-        LOGD("[MAPS]   [%zu] 0x%08lx-0x%08lx r=%d w=%d x=%d  %s",
-             i,
-             (unsigned long)regions[i].start,
-             (unsigned long)regions[i].end,
-             (int)regions[i].readable, (int)regions[i].writable, (int)regions[i].executable,
-             regions[i].path.empty() ? "(anônima)" : regions[i].path.c_str());
-    }
-    if (regions.size() > n) {
-        LOGD("[MAPS]   ... (+%zu regiões omitidas do log)", regions.size() - n);
-    }
 
     return regions;
 }
 
 // ============================================================
-//  Leitura de memória (direta com fallback /proc/self/mem)
+//  Leitura / escrita de memória
 // ============================================================
 static bool safeReadMemory(uintptr_t address, void* buffer, size_t size) {
     if (sigsetjmp(t_jmpBuf, 1) == 0) {
@@ -321,12 +302,9 @@ static bool safeWriteMemory(uintptr_t address, const void* buffer, size_t size) 
 }
 
 static bool readMemory(uintptr_t address, void* buffer, size_t size) {
-    // 1) Leitura direta (deve sempre funcionar em self-process)
-    if (safeReadMemory(address, buffer, size)) {
-        return true;
-    }
+    if (safeReadMemory(address, buffer, size)) return true;
 
-    // 2) Fallback: /proc/self/mem (bloqueado em Android 11+ em muitos dispositivos)
+    // Fallback: /proc/self/mem
     int fd = open("/proc/self/mem", O_RDONLY);
     if (fd < 0) return false;
     errno = 0;
@@ -336,30 +314,24 @@ static bool readMemory(uintptr_t address, void* buffer, size_t size) {
 }
 
 static bool writeMemory(uintptr_t address, const void* buffer, size_t size) {
-    // 1) Tenta /proc/self/mem (funciona em alguns dispositivos)
+    // Tentativa 1: /proc/self/mem
     int fd = open("/proc/self/mem", O_RDWR);
     if (fd >= 0) {
         errno = 0;
         ssize_t n = pwrite64(fd, buffer, size, (off64_t)address);
         close(fd);
-        if (n == (ssize_t)size) {
-            return true;
-        }
+        if (n == (ssize_t)size) return true;
     }
 
-    // 2) Escrita direta
-    if (safeWriteMemory(address, buffer, size)) {
-        return true;
-    }
+    // Tentativa 2: escrita direta
+    if (safeWriteMemory(address, buffer, size)) return true;
 
-    // 3) mprotect + escrita direta
+    // Tentativa 3: mprotect + escrita direta
     size_t pageSize = sysconf(_SC_PAGE_SIZE);
     uintptr_t pageStart = (address / pageSize) * pageSize;
     size_t pageLen = ((address - pageStart + size + pageSize - 1) / pageSize) * pageSize;
     if (mprotect((void*)pageStart, pageLen, PROT_READ | PROT_WRITE) == 0) {
-        if (safeWriteMemory(address, buffer, size)) {
-            return true;
-        }
+        if (safeWriteMemory(address, buffer, size)) return true;
     }
 
     LOGE("[WRITE] Todas as vias falharam em 0x%lx (errno=%d: %s)",
@@ -453,12 +425,12 @@ static std::vector<uint8_t> intToBytes(long long value, int type) {
             break;
         }
         case TYPE_FLOAT: {
-            float v = (float)value;
+            uint32_t v = (uint32_t)value;  // bits já vêm do Java
             bytes.assign((uint8_t*)&v, (uint8_t*)&v + 4);
             break;
         }
         case TYPE_DOUBLE: {
-            double v = (double)value;
+            uint64_t v = (uint64_t)value;  // bits já vêm do Java
             bytes.assign((uint8_t*)&v, (uint8_t*)&v + 8);
             break;
         }
@@ -479,123 +451,196 @@ static std::string bytesToHexStr(const std::vector<uint8_t>& v, size_t maxLen = 
 }
 
 // ============================================================
-//  Thread de varredura
+//  Prefiltro rápido: só chama compareValue se o primeiro byte bater
+//  (256x de speedup típico para EXACT com INT/LONG/FLOAT/DOUBLE)
+// ============================================================
+static inline bool quickByteMatch(uint8_t candidate, uint8_t target) {
+    return candidate == target;
+}
+
+// ============================================================
+//  Escaneia UMA região (usado por cada worker)
+// ============================================================
+static void scanRegion(const MemoryRegion& reg,
+                       const std::vector<uint8_t>& targetBytes,
+                       size_t targetSize,
+                       int type, int condition,
+                       std::vector<ScanResult>& out,
+                       std::atomic<size_t>& bytesOut,
+                       std::atomic<size_t>& readsOut,
+                       std::atomic<size_t>& failOut)
+{
+    if (!reg.readable || reg.start >= reg.end) return;
+
+    const size_t BLOCK_SIZE = 256 * 1024;   // 256 KB por bloco
+    std::vector<uint8_t> block(BLOCK_SIZE);
+    const uint8_t firstByte = targetBytes[0];
+    const bool needFirstByteCheck = (condition == COND_EXACT) && (targetSize > 1);
+
+    uintptr_t addr = reg.start;
+    while (addr < reg.end && !g_scanCancelled.load()) {
+        size_t remaining = reg.end - addr;
+        size_t readSize  = remaining < BLOCK_SIZE ? remaining : BLOCK_SIZE;
+        if (readSize < targetSize) break;
+
+        readsOut.fetch_add(1, std::memory_order_relaxed);
+        if (!readMemory(addr, block.data(), readSize)) {
+            failOut.fetch_add(1, std::memory_order_relaxed);
+            addr += sysconf(_SC_PAGE_SIZE);
+            continue;
+        }
+        bytesOut.fetch_add(readSize, std::memory_order_relaxed);
+
+        // Fast path para o caso mais comum (exato, multi-byte)
+        if (needFirstByteCheck) {
+            const uint8_t* base = block.data();
+            size_t limit = readSize - targetSize;
+            for (size_t offset = 0; offset <= limit; offset++) {
+                if (g_scanCancelled.load(std::memory_order_relaxed)) break;
+                if (!quickByteMatch(base[offset], firstByte)) continue;
+                size_t sizeCheck = 0;
+                if (compareValue(base + offset, targetBytes.data(),
+                                 type, condition, sizeCheck)) {
+                    ScanResult res;
+                    res.address   = addr + offset;
+                    res.dataType  = type;
+                    res.valueSize = sizeCheck;
+                    res.previousValue.assign(base + offset, base + offset + sizeCheck);
+                    out.push_back(std::move(res));
+                }
+            }
+        } else {
+            // Condição > / < ou byte único: comparação completa
+            const uint8_t* base = block.data();
+            size_t limit = readSize - targetSize;
+            for (size_t offset = 0; offset <= limit; offset++) {
+                if (g_scanCancelled.load(std::memory_order_relaxed)) break;
+                size_t sizeCheck = 0;
+                if (compareValue(base + offset, targetBytes.data(),
+                                 type, condition, sizeCheck)) {
+                    ScanResult res;
+                    res.address   = addr + offset;
+                    res.dataType  = type;
+                    res.valueSize = sizeCheck;
+                    res.previousValue.assign(base + offset, base + offset + sizeCheck);
+                    out.push_back(std::move(res));
+                }
+            }
+        }
+        addr += readSize;
+    }
+}
+
+// ============================================================
+//  SCAN THREAD principal
 // ============================================================
 static void scanThread(jobject callbackObj, long long value, int type,
                        int condition, bool isNext) {
     auto tStart = std::chrono::steady_clock::now();
 
     LOGI("=========================================================");
-    LOGI("[SCAN] Thread iniciada | tipo=%s cond=%s valor=%lld isNext=%d",
+    LOGI("[SCAN] Thread principal iniciada | tipo=%s cond=%s valor=%lld isNext=%d",
          typeName(type), condName(condition), value, (int)isNext);
     LOGI("=========================================================");
 
-    JniThreadAttacher attacher(g_jvm);
-    JNIEnv* env = attacher.getEnv();
-    if (!env) {
-        LOGE("[SCAN] Falha crítica: sem JNIEnv");
+    JniThreadAttacher mainAttacher(g_jvm);
+    JNIEnv* mainEnv = mainAttacher.getEnv();
+    if (!mainEnv) {
+        LOGE("[SCAN] Falha JNI attach");
         g_scanRunning = false;
         return;
     }
 
     // Prepara bytes do valor alvo
-    std::vector<uint8_t> targetBytes;
-    if (type == TYPE_FLOAT) {
-        float f = (float)value;
-        targetBytes.assign((uint8_t*)&f, (uint8_t*)&f + 4);
-    } else if (type == TYPE_DOUBLE) {
-        double d = (double)value;
-        targetBytes.assign((uint8_t*)&d, (uint8_t*)&d + 8);
-    } else {
-        targetBytes = intToBytes(value, type);
-    }
-
+    std::vector<uint8_t> targetBytes = intToBytes(value, type);
     if (targetBytes.empty()) {
-        LOGE("[SCAN] Tipo de dado inválido: %d", type);
+        LOGE("[SCAN] Tipo inválido: %d", type);
         g_scanRunning = false;
         return;
     }
     size_t targetSize = targetBytes.size();
-    LOGD("[SCAN] Valor alvo em bytes (%zu): %s",
-         targetSize, bytesToHexStr(targetBytes).c_str());
+    LOGI("[SCAN] Valor alvo (%zu bytes): %s", targetSize,
+         bytesToHexStr(targetBytes).c_str());
 
     std::vector<ScanResult> newResults;
-    newResults.reserve(isNext ? (size_t)4096 : (size_t)65536);
+    newResults.reserve(isNext ? (size_t)4096 : (size_t)131072);
 
-    size_t totalReads  = 0;
-    size_t failedReads = 0;
+    size_t totalReads   = 0;
+    size_t failedReads  = 0;
     size_t bytesScanned = 0;
 
     if (!isNext) {
-        // ---------- PRIMEIRA VARREDURA ----------
+        // ---------- PRIMEIRA VARREDURA (paralela) ----------
         auto regions = parseMaps();
         if (regions.empty()) {
-            LOGE("[SCAN] Nenhuma região válida. Abortando.");
+            LOGE("[SCAN] Nenhuma região válida.");
             g_scanRunning = false;
             return;
         }
 
-        int total = (int)regions.size();
-        int processed = 0;
-        const size_t BLOCK_SIZE = 64 * 1024;
-        std::vector<uint8_t> block(BLOCK_SIZE);
+        const int numRegions = (int)regions.size();
 
-        LOGI("[SCAN] Iniciando varredura completa em %d regiões (bloco=%zu KB)",
-             total, BLOCK_SIZE / 1024);
+        // Número de threads: número de núcleos, limitado a 4 (para não brigar com o jogo)
+        unsigned cores = std::thread::hardware_concurrency();
+        int numThreads = (int)(cores == 0 ? 4u : cores);
+        if (numThreads > 4) numThreads = 4;
+        if (numThreads < 1) numThreads = 1;
 
-        for (const auto& reg : regions) {
-            if (g_scanCancelled.load()) {
-                LOGW("[SCAN] Cancelado pelo usuário no meio da varredura");
-                break;
-            }
-            if (!reg.readable || reg.start >= reg.end) continue;
+        LOGI("[SCAN] %d regiões, %d threads", numRegions, numThreads);
 
-            uintptr_t addr = reg.start;
-            while (addr < reg.end && !g_scanCancelled.load()) {
-                size_t remaining = reg.end - addr;
-                size_t readSize  = remaining < BLOCK_SIZE ? remaining : BLOCK_SIZE;
-                if (readSize < targetSize) break;
+        std::atomic<int> nextRegion{0};
+        std::atomic<int> processedRegions{0};
+        std::atomic<size_t> bytesAt{0};
+        std::atomic<size_t> readsAt{0};
+        std::atomic<size_t> failAt{0};
 
-                totalReads++;
-                if (!readMemory(addr, block.data(), readSize)) {
-                    failedReads++;
-                    addr += sysconf(_SC_PAGE_SIZE);
-                    continue;
+        std::vector<std::vector<ScanResult>> threadResults(numThreads);
+
+        auto worker = [&](int tid) {
+            JniThreadAttacher att(g_jvm);
+            JNIEnv* env = att.getEnv();
+
+            while (true) {
+                if (g_scanCancelled.load()) break;
+                int idx = nextRegion.fetch_add(1);
+                if (idx >= numRegions) break;
+
+                scanRegion(regions[idx], targetBytes, targetSize, type, condition,
+                           threadResults[tid], bytesAt, readsAt, failAt);
+
+                int done = processedRegions.fetch_add(1) + 1;
+                if (env && callbackObj && g_onProgressMethod &&
+                    (done == numRegions || done % 16 == 0)) {
+                    int percent = (done * 100) / numRegions;
+                    env->CallVoidMethod(callbackObj, g_onProgressMethod, percent);
                 }
-                bytesScanned += readSize;
-
-                for (size_t offset = 0; offset + targetSize <= readSize; offset++) {
-                    if (g_scanCancelled.load()) break;
-                    size_t sizeCheck = 0;
-                    if (compareValue(block.data() + offset,
-                                     targetBytes.data(),
-                                     type, condition, sizeCheck)) {
-                        ScanResult res;
-                        res.address     = addr + offset;
-                        res.dataType    = type;
-                        res.valueSize   = sizeCheck;
-                        res.previousValue.assign(block.data() + offset,
-                                                 block.data() + offset + sizeCheck);
-                        newResults.push_back(res);
-                    }
-                }
-                addr += readSize;
             }
+        };
 
-            processed++;
-            if (env && callbackObj && g_onProgressMethod) {
-                int percent = (processed * 100) / total;
-                env->CallVoidMethod(callbackObj, g_onProgressMethod, percent);
-            }
+        std::vector<std::thread> workers;
+        workers.reserve(numThreads);
+        for (int i = 0; i < numThreads; i++) workers.emplace_back(worker, i);
+        for (auto& w : workers) w.join();
+
+        // Merge
+        size_t totalCount = 0;
+        for (auto& v : threadResults) totalCount += v.size();
+        newResults.reserve(totalCount);
+        for (auto& v : threadResults) {
+            for (auto& r : v) newResults.push_back(std::move(r));
         }
+
+        bytesScanned = bytesAt.load();
+        totalReads   = readsAt.load();
+        failedReads  = failAt.load();
+
     } else {
-        // ---------- NEXT SCAN ----------
+        // ---------- NEXT SCAN (sequencial) ----------
         std::shared_lock<std::shared_mutex> lock(g_resultsMutex);
         int total = (int)g_results.size();
+        LOGI("[SCAN] Refinando %d resultados", total);
+
         int processed = 0;
-
-        LOGI("[SCAN] Refinando sobre %d resultados anteriores", total);
-
         for (const auto& res : g_results) {
             if (g_scanCancelled.load()) break;
 
@@ -616,17 +661,18 @@ static void scanThread(jobject callbackObj, long long value, int type,
                 nr.dataType    = type;
                 nr.valueSize   = sizeCheck;
                 nr.previousValue.assign(buffer, buffer + sizeCheck);
-                newResults.push_back(nr);
+                newResults.push_back(std::move(nr));
             }
             processed++;
-            if (env && callbackObj && g_onProgressMethod) {
+            if (mainEnv && callbackObj && g_onProgressMethod &&
+                (processed == total || processed % 512 == 0)) {
                 int percent = total > 0 ? (processed * 100) / total : 100;
-                env->CallVoidMethod(callbackObj, g_onProgressMethod, percent);
+                mainEnv->CallVoidMethod(callbackObj, g_onProgressMethod, percent);
             }
         }
     }
 
-    // ---------- Atualiza resultados ----------
+    // Atualiza resultados globais
     {
         std::unique_lock<std::shared_mutex> lock(g_resultsMutex);
         g_results = std::move(newResults);
@@ -640,39 +686,53 @@ static void scanThread(jobject callbackObj, long long value, int type,
     LOGI("[SCAN]   Leituras: %zu | Falhas: %zu | Bytes: %zu (%.2f MB)",
          totalReads, failedReads, bytesScanned, bytesScanned / 1048576.0);
     LOGI("[SCAN]   Resultados finais: %zu", g_results.size());
+
+    // Mostra os 10 primeiros resultados no log (só no primeiro scan)
+    if (!isNext) {
+        size_t n = g_results.size() < 10 ? g_results.size() : 10;
+        for (size_t i = 0; i < n; i++) {
+            LOGI("[SCAN]   #%zu  0x%08lx  %s",
+                 i,
+                 (unsigned long)g_results[i].address,
+                 bytesToHexStr(g_results[i].previousValue).c_str());
+        }
+        if (g_results.size() > n) {
+            LOGI("[SCAN]   ... (+%zu resultados)", g_results.size() - n);
+        }
+    }
     LOGI("=========================================================");
 
     g_scanRunning   = false;
     g_scanCancelled = false;
 
-    // ---------- Callback ----------
-    if (env && callbackObj && g_onCompleteMethod) {
+    // Callback final
+    if (mainEnv && callbackObj && g_onCompleteMethod) {
         jsize count = (jsize)g_results.size();
         LOGD("[SCAN] Enviando callback com %d endereços", count);
 
-        jlongArray arr = env->NewLongArray(count);
-        jclass byteArrayClass = env->FindClass("[B");
-        jobjectArray valArray = env->NewObjectArray(count, byteArrayClass, nullptr);
+        jlongArray arr = mainEnv->NewLongArray(count);
+        jclass byteArrayClass = mainEnv->FindClass("[B");
+        jobjectArray valArray = mainEnv->NewObjectArray(count, byteArrayClass, nullptr);
 
         if (arr && valArray) {
-            jlong* elements = env->GetLongArrayElements(arr, nullptr);
+            jlong* elements = mainEnv->GetLongArrayElements(arr, nullptr);
             for (jsize i = 0; i < count; ++i) {
                 elements[i] = (jlong)g_results[i].address;
-                jbyteArray ba = env->NewByteArray((jsize)g_results[i].valueSize);
-                env->SetByteArrayRegion(ba, 0, (jsize)g_results[i].valueSize,
-                                        (const jbyte*)g_results[i].previousValue.data());
-                env->SetObjectArrayElement(valArray, i, ba);
-                env->DeleteLocalRef(ba);
+                jbyteArray ba = mainEnv->NewByteArray((jsize)g_results[i].valueSize);
+                mainEnv->SetByteArrayRegion(ba, 0, (jsize)g_results[i].valueSize,
+                                            (const jbyte*)g_results[i].previousValue.data());
+                mainEnv->SetObjectArrayElement(valArray, i, ba);
+                mainEnv->DeleteLocalRef(ba);
             }
-            env->ReleaseLongArrayElements(arr, elements, 0);
-            env->CallVoidMethod(callbackObj, g_onCompleteMethod, arr, valArray);
-            env->DeleteLocalRef(arr);
-            env->DeleteLocalRef(valArray);
+            mainEnv->ReleaseLongArrayElements(arr, elements, 0);
+            mainEnv->CallVoidMethod(callbackObj, g_onCompleteMethod, arr, valArray);
+            mainEnv->DeleteLocalRef(arr);
+            mainEnv->DeleteLocalRef(valArray);
         } else {
-            LOGE("[SCAN] Falha ao alocar arrays JNI para callback");
-            env->CallVoidMethod(callbackObj, g_onCompleteMethod, nullptr, nullptr);
+            LOGE("[SCAN] Falha ao alocar arrays JNI");
+            mainEnv->CallVoidMethod(callbackObj, g_onCompleteMethod, nullptr, nullptr);
         }
-        if (byteArrayClass) env->DeleteLocalRef(byteArrayClass);
+        if (byteArrayClass) mainEnv->DeleteLocalRef(byteArrayClass);
     }
 }
 
@@ -698,17 +758,14 @@ static void freezeLoop() {
 
         int ok = 0, fail = 0;
         for (const auto& entry : frozenCopy) {
-            if (writeMemory(entry.first,
-                            entry.second.first.data(),
+            if (writeMemory(entry.first, entry.second.first.data(),
                             entry.second.first.size())) {
                 ok++;
             } else {
                 fail++;
             }
         }
-        if (fail > 0) {
-            LOGW("[FREEZE] Ciclo: %d OK, %d falhas", ok, fail);
-        }
+        if (fail > 0) LOGW("[FREEZE] Ciclo: %d OK, %d falhas", ok, fail);
     }
 
     LOGI("[FREEZE] Thread encerrada");
@@ -727,33 +784,28 @@ JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeStart
     LOGI("=========================================================");
 
     if (g_scanRunning.load()) {
-        LOGW("[API] Scan já em execução, ignorando chamada");
+        LOGW("[API] Scan já em execução");
         return;
     }
 
     if (g_callbackObj == nullptr) {
-        LOGD("[API] Registrando callback global");
         g_callbackObj = env->NewGlobalRef(thiz);
         jclass cls = env->GetObjectClass(thiz);
         g_onProgressMethod = env->GetMethodID(cls, "onScanProgress", "(I)V");
         g_onCompleteMethod = env->GetMethodID(cls, "onScanComplete", "([J[[B)V");
         if (!g_onProgressMethod || !g_onCompleteMethod) {
-            LOGE("[API] Métodos de callback não encontrados");
+            LOGE("[API] Callbacks não encontrados");
             env->DeleteGlobalRef(g_callbackObj);
             g_callbackObj = nullptr;
             return;
         }
-        LOGI("[API] Callback registrado com sucesso");
+        LOGI("[API] Callback registrado");
     }
 
     g_scanRunning   = true;
     g_scanCancelled = false;
 
-    if (g_scanThread.joinable()) {
-        LOGD("[API] Aguardando thread anterior...");
-        g_scanThread.join();
-    }
-    LOGI("[API] Disparando nova thread de scan");
+    if (g_scanThread.joinable()) g_scanThread.join();
     g_scanThread = std::thread(scanThread, g_callbackObj,
                                (long long)value, (int)type, (int)condition, false);
 }
@@ -765,7 +817,7 @@ JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeNextS
          (long long)value, condName(condition));
 
     if (g_scanRunning.load()) {
-        LOGW("[API] Scan já em execução, ignorando chamada");
+        LOGW("[API] Scan já em execução");
         return;
     }
 
@@ -774,7 +826,7 @@ JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeNextS
     {
         std::shared_lock<std::shared_mutex> lock(g_resultsMutex);
         if (g_results.empty()) {
-            LOGW("[API] Nenhum resultado anterior para refinar");
+            LOGW("[API] Sem resultados para refinar");
             return;
         }
         type  = g_results[0].dataType;
@@ -785,28 +837,24 @@ JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeNextS
     g_scanRunning   = true;
     g_scanCancelled = false;
 
-    if (g_scanThread.joinable()) {
-        g_scanThread.join();
-    }
+    if (g_scanThread.joinable()) g_scanThread.join();
     g_scanThread = std::thread(scanThread, g_callbackObj,
                                (long long)value, type, (int)condition, true);
 }
 
 JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeCancelScan(
     JNIEnv* env, jobject thiz) {
-    LOGW("[API] nativeCancelScan chamado");
+    LOGW("[API] nativeCancelScan");
     g_scanCancelled = true;
 }
 
 JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeClearResults(
     JNIEnv* env, jobject thiz) {
-    LOGI("[API] nativeClearResults chamado");
+    LOGI("[API] nativeClearResults");
 
     {
         std::unique_lock<std::shared_mutex> lock(g_frozenMutex);
-        size_t n = g_frozen.size();
         g_frozen.clear();
-        LOGD("[API]   %zu entradas de freeze removidas", n);
     }
     {
         std::unique_lock<std::mutex> lock(g_freezeCvMutex);
@@ -815,22 +863,16 @@ JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeClear
             g_freezeCv.notify_all();
         }
     }
-    if (g_freezeThread.joinable()) {
-        LOGD("[API]   Aguardando thread de freeze...");
-        g_freezeThread.join();
-    }
+    if (g_freezeThread.joinable()) g_freezeThread.join();
     {
         std::unique_lock<std::shared_mutex> lock(g_resultsMutex);
-        size_t n = g_results.size();
         g_results.clear();
-        LOGD("[API]   %zu resultados removidos", n);
     }
     LOGI("[API] Limpeza concluída");
 }
 
 JNIEXPORT jlongArray JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeGetResults(
     JNIEnv* env, jobject thiz) {
-    LOGD("[API] nativeGetResults");
     std::shared_lock<std::shared_mutex> lock(g_resultsMutex);
     jsize count = (jsize)g_results.size();
     jlongArray arr = env->NewLongArray(count);
@@ -841,7 +883,6 @@ JNIEXPORT jlongArray JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativ
         }
         env->ReleaseLongArrayElements(arr, elements, 0);
     }
-    LOGD("[API]   Retornando %d endereços", count);
     return arr;
 }
 
@@ -849,52 +890,30 @@ JNIEXPORT jboolean JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeW
     JNIEnv* env, jobject thiz, jlong address, jbyteArray data) {
     jsize len = env->GetArrayLength(data);
     jbyte* bytes = env->GetByteArrayElements(data, nullptr);
-    LOGD("[API] nativeWriteMemory em 0x%lx (%d bytes)",
-         (unsigned long)address, len);
     bool ok = writeMemory((uintptr_t)address, bytes, (size_t)len);
     env->ReleaseByteArrayElements(data, bytes, JNI_ABORT);
-    LOGI("[API]   Escrita %s", ok ? "OK" : "FALHOU");
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeToggleFreeze(
     JNIEnv* env, jobject thiz, jlong address, jlong value, jint type, jboolean enable) {
 
-    LOGI("[API] nativeToggleFreeze 0x%lx valor=%lld tipo=%s enable=%d",
-         (unsigned long)address, (long long)value, typeName(type), (int)enable);
-
     std::unique_lock<std::shared_mutex> lock(g_frozenMutex);
     uintptr_t addr = (uintptr_t)address;
 
     if (enable) {
-        std::vector<uint8_t> bytes;
-        if (type == TYPE_FLOAT) {
-            float f = (float)value;
-            bytes.assign((uint8_t*)&f, (uint8_t*)&f + 4);
-        } else if (type == TYPE_DOUBLE) {
-            double d = (double)value;
-            bytes.assign((uint8_t*)&d, (uint8_t*)&d + 8);
-        } else {
-            bytes = intToBytes(value, type);
-        }
-        if (bytes.empty()) {
-            LOGE("[API]   Bytes vazios, abortando");
-            return;
-        }
+        std::vector<uint8_t> bytes = intToBytes(value, type);  // trata FLOAT/DOUBLE corretamente
+        if (bytes.empty()) return;
         g_frozen[addr] = {bytes, type};
-        LOGI("[API]   Congelado (%zu endereços no total)", g_frozen.size());
 
         if (!g_freezeRunning) {
             g_freezeRunning = true;
-            if (g_freezeThread.joinable()) {
-                g_freezeThread.join();
-            }
+            if (g_freezeThread.joinable()) g_freezeThread.join();
             g_freezeThread = std::thread(freezeLoop);
         }
         g_freezeCv.notify_all();
     } else {
         g_frozen.erase(addr);
-        LOGI("[API]   Descongelado (%zu restantes)", g_frozen.size());
         if (g_frozen.empty() && g_freezeRunning) {
             std::unique_lock<std::mutex> cvLock(g_freezeCvMutex);
             g_freezeRunning = false;
@@ -906,10 +925,7 @@ JNIEXPORT void JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeToggl
 JNIEXPORT jbyteArray JNICALL Java_com_exemplo_scanner_MemoryScannerService_nativeReadMemory(
     JNIEnv* env, jobject thiz, jlong address, jint size) {
     jbyteArray arr = env->NewByteArray(size);
-    if (!arr) {
-        LOGE("[API] nativeReadMemory: falha ao alocar jbyteArray");
-        return nullptr;
-    }
+    if (!arr) return nullptr;
     jbyte* bytes = env->GetByteArrayElements(arr, nullptr);
     bool ok = readMemory((uintptr_t)address, bytes, (size_t)size);
     env->ReleaseByteArrayElements(arr, bytes, ok ? 0 : JNI_ABORT);
@@ -923,40 +939,33 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
     g_jvm = vm;
 
     LOGI("=========================================================");
-    LOGI("[INIT] ███ MemScanner carregado com sucesso ███");
-    LOGI("[INIT]   JavaVM: %p", (void*)vm);
-    LOGI("[INIT]   JNI version: 1.6");
-    LOGI("[INIT]   PID: %d", getpid());
-    LOGI("[INIT]   Page size: %ld bytes", sysconf(_SC_PAGE_SIZE));
-    LOGI("[INIT]   Arquitetura: %s", sizeof(void*) == 4 ? "32-bit" : "64-bit");
+    LOGI("[INIT] ███ MemScanner carregado ███");
+    LOGI("[INIT]   PID: %d | Page: %ld bytes | %s",
+         getpid(), sysconf(_SC_PAGE_SIZE),
+         sizeof(void*) == 4 ? "32-bit" : "64-bit");
 
     installSigHandlers();
 
-    // Teste rápido de leitura (pega a 1ª região legível do maps)
+    // Teste de sanidade
     {
         std::ifstream maps("/proc/self/maps");
         std::string line;
-        int testedLines = 0;
-        bool testDone = false;
-        while (std::getline(maps, line) && !testDone && testedLines < 5) {
-            testedLines++;
+        int tested = 0;
+        bool done = false;
+        while (std::getline(maps, line) && !done && tested < 5) {
+            tested++;
             unsigned long start = 0;
             char perms[5] = {0};
-            if (sscanf(line.c_str(), "%lx-%*lx %4s", &start, perms) >= 2) {
-                if (perms[0] == 'r') {
-                    uint8_t buf[16] = {0};
-                    if (readMemory((uintptr_t)start, buf, 16)) {
-                        LOGI("[INIT] ✓ Teste de leitura OK em 0x%lx: %02X %02X %02X %02X",
-                             start, buf[0], buf[1], buf[2], buf[3]);
-                    } else {
-                        LOGE("[INIT] ✗ Teste de leitura FALHOU em 0x%lx", start);
-                    }
-                    testDone = true;
+            if (sscanf(line.c_str(), "%lx-%*lx %4s", &start, perms) >= 2 && perms[0] == 'r') {
+                uint8_t buf[16] = {0};
+                if (readMemory((uintptr_t)start, buf, 16)) {
+                    LOGI("[INIT] ✓ Leitura OK em 0x%lx: %02X %02X %02X %02X",
+                         start, buf[0], buf[1], buf[2], buf[3]);
+                } else {
+                    LOGE("[INIT] ✗ Leitura FALHOU em 0x%lx", start);
                 }
+                done = true;
             }
-        }
-        if (!testDone) {
-            LOGW("[INIT] Nenhuma região legível encontrada para teste inicial");
         }
     }
 
