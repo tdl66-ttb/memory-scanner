@@ -1,31 +1,33 @@
 package com.exemplo.scanner;
 
+import java.lang.ref.WeakReference;
+
 /**
- * Classe singleton para gerenciar o callback JNI e evitar vazamentos.
- * Mantém uma referência fraca ao callback para permitir coleta de lixo.
+ * Singleton que guarda o callback (Service) por referência FRACA, para não vazar o
+ * Service depois do onDestroy. (A versão anterior dizia "fraca" mas guardava forte.)
  */
 public class MemoryScanner {
     private static MemoryScanner instance;
-    private Object callback;
+    private WeakReference<Object> callback;
 
     private MemoryScanner() {}
 
-    public static MemoryScanner getInstance() {
+    public static synchronized MemoryScanner getInstance() {
         if (instance == null) {
             instance = new MemoryScanner();
         }
         return instance;
     }
 
-    public void setCallback(Object callback) {
-        this.callback = callback;
+    public synchronized void setCallback(Object callback) {
+        this.callback = (callback == null) ? null : new WeakReference<>(callback);
     }
 
-    public Object getCallback() {
-        return callback;
+    public synchronized Object getCallback() {
+        return (callback == null) ? null : callback.get();
     }
 
-    public void clearCallback() {
+    public synchronized void clearCallback() {
         callback = null;
     }
 }

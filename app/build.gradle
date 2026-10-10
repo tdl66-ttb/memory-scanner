@@ -4,17 +4,24 @@ android {
     namespace "com.exemplo.scanner"
     compileSdk 34
 
+    // Se o build reclamar de NDK, fixe aqui a versão que está instalada no Codespace, ex.:
+    // ndkVersion "25.1.8937393"
+
     defaultConfig {
         applicationId "com.exemplo.scanner"
         minSdk 21
-        targetSdk 33
-        versionCode 1
-        versionName "1.0"
+        targetSdk 34
+        // Para o update 5 instalar POR CIMA da versão anterior, versionCode precisa subir.
+        versionCode 5
+        versionName "5.0"
 
         externalNativeBuild {
             cmake {
-                cppFlags "-std=c++17 -fPIC -Wall -Wextra -O2"
+                // Padrão C++, -Wall, visibilidade e logs de Debug ficam no CMakeLists.txt.
+                // Só 32 bits (armv8l roda armeabi-v7a).
                 abiFilters "armeabi-v7a"
+                arguments "-DANDROID_STL=c++_static",
+                          "-DANDROID_ARM_MODE=arm"
             }
         }
     }
@@ -26,19 +33,46 @@ android {
 
     buildTypes {
         release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'),
+                          'proguard-rules.pro'
+            // Sem assinatura o release sai como "unsigned" e NÃO instala.
+            // Esta linha assina com a chave debug: serve para teste/sideload.
+            // Para distribuir de verdade, crie um keystore e um signingConfig próprio.
+            signingConfig signingConfigs.debug
+        }
+        debug {
             minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            jniDebuggable true
         }
     }
 
     externalNativeBuild {
         cmake {
             path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+
+    // minSdk 21 < 23: o System.loadLibrary precisa das .so extraídas.
+    // (o android:extractNativeLibs saiu do manifest; é aqui que se controla)
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+        resources {
+            excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE*']
         }
     }
 
     buildFeatures {
         buildConfig true
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
     }
 }
 

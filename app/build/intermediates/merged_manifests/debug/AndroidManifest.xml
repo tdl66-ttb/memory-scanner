@@ -1,39 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- O pacote vem do "namespace" do app/build.gradle (não repetir "package" aqui). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.exemplo.scanner"
-    android:versionCode="1"
-    android:versionName="1.0" >
+    android:versionCode="5"
+    android:versionName="5.0" >
 
     <uses-sdk
         android:minSdkVersion="21"
-        android:targetSdkVersion="33" />
+        android:targetSdkVersion="34" />
 
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Para salvar/ler arquivos -->
-    <uses-permission
-        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="28" />
+    <!-- Android 14+: tipo de FGS declarado. No Android 11 não tem efeito. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Android 13+: notificação do serviço (pedir em tempo de execução na Activity). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <permission
         android:name="com.exemplo.scanner.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
         android:protectionLevel="signature" />
 
     <uses-permission android:name="com.exemplo.scanner.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
-
+    <!--
+ Removidos: INTERNET e WRITE_EXTERNAL_STORAGE. O app só usa cacheDir/filesDir
+         e não faz rede. Se a OverlayPermissionActivity precisar de rede, volte com INTERNET.
+    -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:appComponentFactory="androidx.core.app.CoreComponentFactory"
         android:debuggable="true"
-        android:extractNativeLibs="true"
         android:label="Memory Scanner"
         android:theme="@style/Theme.AppCompat.NoActionBar" >
         <service
             android:name="com.exemplo.scanner.MemoryScannerService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse" >
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="memory analysis / debugging" />
+        </service>
 
         <activity
             android:name="com.exemplo.scanner.OverlayPermissionActivity"

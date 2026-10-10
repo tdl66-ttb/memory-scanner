@@ -1,31 +1,30 @@
 1<?xml version="1.0" encoding="utf-8"?>
-2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-3    package="com.exemplo.scanner"
-4    android:versionCode="1"
-5    android:versionName="1.0" >
-6
-7    <uses-sdk
-8        android:minSdkVersion="21"
-8-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml
-9        android:targetSdkVersion="33" />
+2<!-- O pacote vem do "namespace" do app/build.gradle (não repetir "package" aqui). -->
+3<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+4    package="com.exemplo.scanner"
+5    android:versionCode="5"
+6    android:versionName="5.0" >
+7
+8    <uses-sdk
+9        android:minSdkVersion="21"
 9-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml
-10
-11    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-11-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:4:5-78
-11-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:4:22-75
-12    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-12-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:5:5-77
-12-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:5:22-74
-13    <uses-permission android:name="android.permission.INTERNET" />
-13-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:6:5-67
-13-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:6:22-64
-14    <!-- Para salvar/ler arquivos -->
-15    <uses-permission
-15-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:8:5-9:38
-16        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-16-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:8:22-78
-17        android:maxSdkVersion="28" />
-17-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:9:9-35
+10        android:targetSdkVersion="34" />
+10-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml
+11
+12    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+12-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:5:5-78
+12-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:5:22-75
+13    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+13-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:6:5-77
+13-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:6:22-74
+14    <!-- Android 14+: tipo de FGS declarado. No Android 11 não tem efeito. -->
+15    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+15-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:8:5-89
+15-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:8:22-86
+16    <!-- Android 13+: notificação do serviço (pedir em tempo de execução na Activity). -->
+17    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+17-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:10:5-77
+17-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:10:22-74
 18
 19    <permission
 19-->[androidx.core:core:1.9.0] /home/codespace/.gradle/caches/8.10.2/transforms/68ffa4751f8687e4d4d08e5f461f905d/transformed/core-1.9.0/AndroidManifest.xml:22:5-24:47
@@ -37,76 +36,84 @@
 23    <uses-permission android:name="com.exemplo.scanner.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
 23-->[androidx.core:core:1.9.0] /home/codespace/.gradle/caches/8.10.2/transforms/68ffa4751f8687e4d4d08e5f461f905d/transformed/core-1.9.0/AndroidManifest.xml:26:5-97
 23-->[androidx.core:core:1.9.0] /home/codespace/.gradle/caches/8.10.2/transforms/68ffa4751f8687e4d4d08e5f461f905d/transformed/core-1.9.0/AndroidManifest.xml:26:22-94
-24
-25    <application
-25-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:11:5-35:19
-26        android:allowBackup="true"
-26-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:12:9-35
-27        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
-27-->[androidx.core:core:1.9.0] /home/codespace/.gradle/caches/8.10.2/transforms/68ffa4751f8687e4d4d08e5f461f905d/transformed/core-1.9.0/AndroidManifest.xml:28:18-86
-28        android:debuggable="true"
-29        android:extractNativeLibs="true"
-29-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:15:9-41
-30        android:label="Memory Scanner"
-30-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:13:9-39
-31        android:theme="@style/Theme.AppCompat.NoActionBar" >
-31-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:14:9-59
-32        <service
-32-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:17:9-21:56
-33            android:name="com.exemplo.scanner.MemoryScannerService"
-33-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:18:13-49
-34            android:enabled="true"
-34-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:19:13-35
-35            android:exported="false"
-35-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:20:13-37
-36            android:foregroundServiceType="dataSync" />
-36-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:21:13-53
-37
-38        <activity
-38-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:23:9-33:20
-39            android:name="com.exemplo.scanner.OverlayPermissionActivity"
-39-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:24:13-54
-40            android:excludeFromRecents="true"
-40-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:26:13-46
-41            android:exported="true"
-41-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:28:13-36
-42            android:launchMode="singleInstance"
-42-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:27:13-48
-43            android:theme="@android:style/Theme.Translucent.NoTitleBar" >
-43-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:25:13-72
-44            <intent-filter>
-44-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:29:13-32:29
-45                <action android:name="android.intent.action.MAIN" />
-45-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:30:17-69
-45-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:30:25-66
-46
-47                <category android:name="android.intent.category.LAUNCHER" />
-47-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:31:17-77
-47-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:31:27-74
-48            </intent-filter>
-49        </activity>
-50
-51        <provider
-51-->[androidx.emoji2:emoji2:1.2.0] /home/codespace/.gradle/caches/8.10.2/transforms/339553f16abfa52753828ee5ea00c746/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:24:9-32:20
-52            android:name="androidx.startup.InitializationProvider"
-52-->[androidx.emoji2:emoji2:1.2.0] /home/codespace/.gradle/caches/8.10.2/transforms/339553f16abfa52753828ee5ea00c746/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:25:13-67
-53            android:authorities="com.exemplo.scanner.androidx-startup"
-53-->[androidx.emoji2:emoji2:1.2.0] /home/codespace/.gradle/caches/8.10.2/transforms/339553f16abfa52753828ee5ea00c746/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:26:13-68
-54            android:exported="false" >
-54-->[androidx.emoji2:emoji2:1.2.0] /home/codespace/.gradle/caches/8.10.2/transforms/339553f16abfa52753828ee5ea00c746/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:27:13-37
-55            <meta-data
-55-->[androidx.emoji2:emoji2:1.2.0] /home/codespace/.gradle/caches/8.10.2/transforms/339553f16abfa52753828ee5ea00c746/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:29:13-31:52
-56                android:name="androidx.emoji2.text.EmojiCompatInitializer"
-56-->[androidx.emoji2:emoji2:1.2.0] /home/codespace/.gradle/caches/8.10.2/transforms/339553f16abfa52753828ee5ea00c746/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:30:17-75
-57                android:value="androidx.startup" />
-57-->[androidx.emoji2:emoji2:1.2.0] /home/codespace/.gradle/caches/8.10.2/transforms/339553f16abfa52753828ee5ea00c746/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:31:17-49
-58            <meta-data
-58-->[androidx.lifecycle:lifecycle-process:2.4.1] /home/codespace/.gradle/caches/8.10.2/transforms/ef6cc5c85e5d8e0ebc807317d696166a/transformed/jetified-lifecycle-process-2.4.1/AndroidManifest.xml:31:13-33:52
-59                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
-59-->[androidx.lifecycle:lifecycle-process:2.4.1] /home/codespace/.gradle/caches/8.10.2/transforms/ef6cc5c85e5d8e0ebc807317d696166a/transformed/jetified-lifecycle-process-2.4.1/AndroidManifest.xml:32:17-78
-60                android:value="androidx.startup" />
-60-->[androidx.lifecycle:lifecycle-process:2.4.1] /home/codespace/.gradle/caches/8.10.2/transforms/ef6cc5c85e5d8e0ebc807317d696166a/transformed/jetified-lifecycle-process-2.4.1/AndroidManifest.xml:33:17-49
-61        </provider>
-62    </application>
-63
-64</manifest>
+24    <!--
+25 Removidos: INTERNET e WRITE_EXTERNAL_STORAGE. O app só usa cacheDir/filesDir
+26         e não faz rede. Se a OverlayPermissionActivity precisar de rede, volte com INTERNET.
+27    -->
+28    <application
+28-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:15:5-42:19
+29        android:allowBackup="false"
+29-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:16:9-36
+30        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+30-->[androidx.core:core:1.9.0] /home/codespace/.gradle/caches/8.10.2/transforms/68ffa4751f8687e4d4d08e5f461f905d/transformed/core-1.9.0/AndroidManifest.xml:28:18-86
+31        android:debuggable="true"
+32        android:label="Memory Scanner"
+32-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:17:9-39
+33        android:theme="@style/Theme.AppCompat.NoActionBar" >
+33-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:18:9-59
+34        <service
+34-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:20:9-28:19
+35            android:name="com.exemplo.scanner.MemoryScannerService"
+35-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:21:13-49
+36            android:enabled="true"
+36-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:22:13-35
+37            android:exported="false"
+37-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:23:13-37
+38            android:foregroundServiceType="specialUse" >
+38-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:24:13-55
+39            <property
+39-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:25:13-27:63
+40                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+40-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:26:17-76
+41                android:value="memory analysis / debugging" />
+41-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:27:17-60
+42        </service>
+43
+44        <activity
+44-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:30:9-40:20
+45            android:name="com.exemplo.scanner.OverlayPermissionActivity"
+45-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:31:13-54
+46            android:excludeFromRecents="true"
+46-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:33:13-46
+47            android:exported="true"
+47-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:35:13-36
+48            android:launchMode="singleInstance"
+48-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:34:13-48
+49            android:theme="@android:style/Theme.Translucent.NoTitleBar" >
+49-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:32:13-72
+50            <intent-filter>
+50-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:36:13-39:29
+51                <action android:name="android.intent.action.MAIN" />
+51-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:37:17-69
+51-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:37:25-66
+52
+53                <category android:name="android.intent.category.LAUNCHER" />
+53-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:38:17-77
+53-->/workspaces/memory-scanner/app/src/main/AndroidManifest.xml:38:27-74
+54            </intent-filter>
+55        </activity>
+56
+57        <provider
+57-->[androidx.emoji2:emoji2:1.2.0] /home/codespace/.gradle/caches/8.10.2/transforms/339553f16abfa52753828ee5ea00c746/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:24:9-32:20
+58            android:name="androidx.startup.InitializationProvider"
+58-->[androidx.emoji2:emoji2:1.2.0] /home/codespace/.gradle/caches/8.10.2/transforms/339553f16abfa52753828ee5ea00c746/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:25:13-67
+59            android:authorities="com.exemplo.scanner.androidx-startup"
+59-->[androidx.emoji2:emoji2:1.2.0] /home/codespace/.gradle/caches/8.10.2/transforms/339553f16abfa52753828ee5ea00c746/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:26:13-68
+60            android:exported="false" >
+60-->[androidx.emoji2:emoji2:1.2.0] /home/codespace/.gradle/caches/8.10.2/transforms/339553f16abfa52753828ee5ea00c746/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:27:13-37
+61            <meta-data
+61-->[androidx.emoji2:emoji2:1.2.0] /home/codespace/.gradle/caches/8.10.2/transforms/339553f16abfa52753828ee5ea00c746/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:29:13-31:52
+62                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+62-->[androidx.emoji2:emoji2:1.2.0] /home/codespace/.gradle/caches/8.10.2/transforms/339553f16abfa52753828ee5ea00c746/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:30:17-75
+63                android:value="androidx.startup" />
+63-->[androidx.emoji2:emoji2:1.2.0] /home/codespace/.gradle/caches/8.10.2/transforms/339553f16abfa52753828ee5ea00c746/transformed/jetified-emoji2-1.2.0/AndroidManifest.xml:31:17-49
+64            <meta-data
+64-->[androidx.lifecycle:lifecycle-process:2.4.1] /home/codespace/.gradle/caches/8.10.2/transforms/ef6cc5c85e5d8e0ebc807317d696166a/transformed/jetified-lifecycle-process-2.4.1/AndroidManifest.xml:31:13-33:52
+65                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+65-->[androidx.lifecycle:lifecycle-process:2.4.1] /home/codespace/.gradle/caches/8.10.2/transforms/ef6cc5c85e5d8e0ebc807317d696166a/transformed/jetified-lifecycle-process-2.4.1/AndroidManifest.xml:32:17-78
+66                android:value="androidx.startup" />
+66-->[androidx.lifecycle:lifecycle-process:2.4.1] /home/codespace/.gradle/caches/8.10.2/transforms/ef6cc5c85e5d8e0ebc807317d696166a/transformed/jetified-lifecycle-process-2.4.1/AndroidManifest.xml:33:17-49
+67        </provider>
+68    </application>
+69
+70</manifest>

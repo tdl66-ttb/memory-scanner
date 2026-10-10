@@ -1,0 +1,7 @@
+ninja: Entering directory `/workspaces/memory-scanner/app/.cxx/Debug/3a28u2nr/armeabi-v7a'
+[1/2] Building CXX object CMakeFiles/memscanner.dir/memscanner.cpp.o
+/workspaces/memory-scanner/app/src/main/cpp/memscanner.cpp:213:19: warning: unused variable 'g_intArrayClass' [-Wunused-variable]
+static jclass     g_intArrayClass    = nullptr;
+                  ^
+1 warning generated.
+[2/2] Linking CXX shared library /workspaces/memory-scanner/app/build/intermediates/cxx/Debug/3a28u2nr/obj/armeabi-v7a/libmemscanner.so

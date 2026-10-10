@@ -1,0 +1,19 @@
+/home/codespace/android-sdk/cmake/3.22.1/bin/cmake \
+  -H/workspaces/memory-scanner/app/src/main/cpp \
+  -DCMAKE_SYSTEM_NAME=Android \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -DCMAKE_SYSTEM_VERSION=21 \
+  -DANDROID_PLATFORM=android-21 \
+  -DANDROID_ABI=armeabi-v7a \
+  -DCMAKE_ANDROID_ARCH_ABI=armeabi-v7a \
+  -DANDROID_NDK=/home/codespace/android-sdk/ndk/23.1.7779620 \
+  -DCMAKE_ANDROID_NDK=/home/codespace/android-sdk/ndk/23.1.7779620 \
+  -DCMAKE_TOOLCHAIN_FILE=/home/codespace/android-sdk/ndk/23.1.7779620/build/cmake/android.toolchain.cmake \
+  -DCMAKE_MAKE_PROGRAM=/home/codespace/android-sdk/cmake/3.22.1/bin/ninja \
+  -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=/workspaces/memory-scanner/app/build/intermediates/cxx/Debug/3a28u2nr/obj/armeabi-v7a \
+  -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=/workspaces/memory-scanner/app/build/intermediates/cxx/Debug/3a28u2nr/obj/armeabi-v7a \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -B/workspaces/memory-scanner/app/.cxx/Debug/3a28u2nr/armeabi-v7a \
+  -GNinja \
+  -DANDROID_STL=c++_static \
+  -DANDROID_ARM_MODE=arm

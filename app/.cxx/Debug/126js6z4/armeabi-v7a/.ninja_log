@@ -29,3 +29,6 @@
 0	3	0	clean	e90b4e32024f220
 44	6366	1791497480511509681	CMakeFiles/memscanner.dir/memscanner.cpp.o	b1152862c63a9bcd
 6366	8707	1791497482858509723	/workspaces/memory-scanner/app/build/intermediates/cxx/Debug/126js6z4/obj/armeabi-v7a/libmemscanner.so	6fa263de81cbaa74
+0	7	0	clean	e90b4e32024f220
+23	7914	1791583227843400800	CMakeFiles/memscanner.dir/memscanner.cpp.o	b1152862c63a9bcd
+7914	10116	1791583230055400777	/workspaces/memory-scanner/app/build/intermediates/cxx/Debug/126js6z4/obj/armeabi-v7a/libmemscanner.so	6fa263de81cbaa74

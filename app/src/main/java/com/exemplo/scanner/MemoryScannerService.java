@@ -7,12 +7,14 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.provider.Settings;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.util.DisplayMetrics;
@@ -26,6 +28,7 @@ import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
@@ -35,13 +38,17 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
-import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,7 +62,11 @@ public class MemoryScannerService extends Service
     private static final String CHANNEL_ID = "memory_scanner_channel";
     private static final int NOTIFICATION_ID = 1001;
 
-    // Tipos (espelham enum C++ DataType)
+    private static final String PREFS_NAME = "memscanner";
+    private static final String PREF_POINTER_STATIC = "pointer_static_only";
+    private static final String PREF_MODULE_FILTER  = "module_filter";
+
+    // Tipos
     private static final int TYPE_BYTE   = 0;
     private static final int TYPE_SHORT  = 1;
     private static final int TYPE_INT    = 2;
@@ -63,31 +74,50 @@ public class MemoryScannerService extends Service
     private static final int TYPE_FLOAT  = 4;
     private static final int TYPE_DOUBLE = 5;
 
-    // Condições (espelham enum C++ ScanCondition)
+    // Condições
     private static final int COND_EXACT   = 0;
     private static final int COND_GREATER = 1;
     private static final int COND_LESS    = 2;
     private static final int COND_RANGE   = 3;
 
-    // Filtros (espelham RegionFilterFlags)
+    // Filtros de região
     private static final int RF_NONE      = 0;
     private static final int RF_RW_ONLY   = 1;
     private static final int RF_SKIP_EXEC = 2;
     private static final int RF_ANON_ONLY = 4;
+
+    // Snapshot diff modes
+    private static final int DIFF_CHANGED   = 0;
+    private static final int DIFF_UNCHANGED = 1;
+    private static final int DIFF_INCREASED = 2;
+    private static final int DIFF_DECREASED = 3;
+
+    // String encodings
+    private static final int STR_UTF8     = 0;
+    private static final int STR_UTF16LE  = 1;
 
     private static final String[] TYPE_NAMES   = {"Byte", "Short", "Int", "Long", "Float", "Double"};
     private static final String[] COND_NAMES   = {"Exato", "Maior", "Menor", "Faixa"};
     private static final String[] REGION_NAMES = {"Tudo", "Rápido(rw)", "Anônimo", "Sem código"};
     private static final int[]    REGION_MASKS = {RF_NONE, RF_RW_ONLY, RF_ANON_ONLY, RF_SKIP_EXEC};
 
-    private static final int DISPLAY_LIMIT = 100_000;
+    // Aparelhos Go têm heap Java pequena: 50k itens bastam (o total real continua sendo contado).
+    private static final int DISPLAY_LIMIT = 50_000;
 
-    // Fila de entrada (callbacks JNI) + drain coalescido
+    // Tamanho do ponteiro do processo (4 em 32 bits, 8 em 64 bits).
+    private static final int PTR_SIZE =
+            (Build.VERSION.SDK_INT >= 23 && android.os.Process.is64Bit()) ? 8 : 4;
+
+    // Fila de entrada
     private final Object incomingLock = new Object();
     private final List<String> incomingItems = new ArrayList<>();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean drainScheduled = new AtomicBoolean(false);
     private volatile boolean scanActive = false;
+    // true só quando o nativo tem uma lista de resultados que o Next Scan pode refinar
+    private volatile boolean refinable = false;
+    // false se o onCreate abortou (sem permissão de overlay) — evita sobrescrever o watch.txt
+    private boolean ready = false;
     private boolean displayFullNotified = false;
 
     private final AtomicInteger totalAddresses = new AtomicInteger(0);
@@ -106,7 +136,7 @@ public class MemoryScannerService extends Service
     private boolean expanded = false;
 
     private ListView listView;
-    private TextView tvTitle, tvStatus;
+    private TextView tvTitle, tvStatus, tvFilterStatus;
     private EditText editValue, editValue2;
     private Button btnType, btnCondition, btnRegion;
     private int currentType = TYPE_INT;
@@ -114,15 +144,30 @@ public class MemoryScannerService extends Service
     private int currentRegion = 0;
     private int lastScanType = TYPE_INT;
 
+    private boolean pointerStaticOnly = false;
+    private String  moduleFilter = "";
+
+    private long lastPointerTarget = 0;
+
+    // Paths persistentes
+    private static class PointerPath {
+        String module;
+        long   baseOffset;
+        int[]  offsets; // offsets após cada deref; pelo menos 1
+    }
+    private final List<PointerPath> pointerPaths = new ArrayList<>();
+
     private Button btnScan, btnNext, btnWrite, btnFreeze, btnClear, btnCancel,
                    btnClose, btnCloseService, btnSave, btnLoad, btnVicinity,
-                   btnAoB, btnPointer, btnWatchAdd, btnWatchShow, btnFollow;
+                   btnAoB, btnPointer, btnWatchAdd, btnWatchShow, btnFollow,
+                   btnString, btnSnapshot, btnModules, btnPaths,
+                   btnMarkAll, btnUnmarkAll, btnSameOffset, btnFilterClear;
+
     private ArrayAdapter<String> adapter;
     private final List<String> displayItems = new ArrayList<>();
     private ProgressBar progressBar;
 
-    // Watch list persistente
-    // Mapa: endereço → isPointer (true = dereferenciar antes de ler/escrever)
+    // Watch: endereço → isPointer (true = dereferenciar)
     private final Map<Long, Boolean> watchAddrs = new LinkedHashMap<>();
 
     private static final int OVERLAY_TYPE =
@@ -137,14 +182,26 @@ public class MemoryScannerService extends Service
     // ==================== Métodos nativos ====================
     public native void    nativeSetWorkDir(String path);
     public native void    nativeSetRegionFilter(int mask);
-    public native void    nativeStartScan(long value, long value2, int type, int condition);
-    public native void    nativeNextScan(long value, long value2, int condition);
-    public native void    nativeAoBScan(String pattern, int limit);
-    public native void    nativePointerScan(long targetAddr, int maxDepth);
+    public native void    nativeSetPointerStaticFilter(boolean enabled);
+    public native void    nativeSetModuleFilter(String pattern);
+    public native String[] nativeListModules();
+    public native long    nativeGetModuleBase(String moduleName);
+    public native String  nativeFindModuleForAddr(long addr);
+    public native long    nativeResolvePointerPath(long baseAddr, int[] offsets);
+    public native boolean nativeStartScan(long value, long value2, int type, int condition);
+    public native boolean nativeNextScan(long value, long value2, int condition);
+    public native boolean nativeStringScan(String text, int encoding);
+    public native boolean nativeAoBScan(String pattern, int limit);
+    public native boolean nativePointerScan(long targetAddr, int maxDepth);
+    public native int     nativeSnapshotSave();
+    public native int     nativeSnapshotDiff(int mode);
+    public native void    nativeSnapshotClear();
     public native void    nativeSetDisplayFull();
     public native void    nativeCancelScan();
     public native void    nativeClearResults();
-    public native long[]  nativeGetResults();
+    public native long[]  nativeGetResults(int maxCount);
+    public native int     nativeGetLastScanType();
+    public native void    nativeShutdown();
     public native boolean nativeWriteMemory(long address, byte[] data);
     public native void    nativeToggleFreeze(long address, long value, int type, boolean enable);
     public native byte[]  nativeReadMemory(long address, int size);
@@ -156,31 +213,57 @@ public class MemoryScannerService extends Service
         super.onCreate();
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         createNotificationChannel();
+        // Android 8+: startForeground precisa vir logo após startForegroundService().
+        startForeground(NOTIFICATION_ID, buildNotification());
+
+        // Sem a permissão de overlay o addView lança BadTokenException (e, com serviço
+        // reiniciável, entrava em crash loop).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "Permita \"Sobrepor a outros apps\" para usar o scanner",
+                    Toast.LENGTH_LONG).show();
+            stopSelf();
+            return;
+        }
+
         nativeSetWorkDir(getCacheDir().getAbsolutePath());
         nativeSetRegionFilter(REGION_MASKS[currentRegion]);
+
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        pointerStaticOnly = prefs.getBoolean(PREF_POINTER_STATIC, false);
+        moduleFilter      = prefs.getString(PREF_MODULE_FILTER, "");
+        nativeSetPointerStaticFilter(pointerStaticOnly);
+        nativeSetModuleFilter(moduleFilter);
+        Log.i(TAG, "Prefs: pointerStatic=" + pointerStaticOnly + " module=" + moduleFilter);
+
         loadWatch();
-        startForeground(NOTIFICATION_ID, buildNotification());
         createBubble();
         MemoryScanner.getInstance().setCallback(this);
+        ready = true;
     }
 
+    // NOT_STICKY: reiniciar sozinho depois de um kill só recriaria o overlay sem estado.
     @Override
-    public int onStartCommand(Intent intent, int flags, int startId) { return START_STICKY; }
+    public int onStartCommand(Intent intent, int flags, int startId) { return START_NOT_STICKY; }
     @Override
     public IBinder onBind(Intent intent) { return null; }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
+        mainHandler.removeCallbacksAndMessages(null);
         MemoryScanner.getInstance().clearCallback();
-        saveWatch();
+        if (ready) saveWatch();
         try {
             if (bubbleView != null && bubbleView.getWindowToken() != null)
                 wm.removeView(bubbleView);
+        } catch (Exception ignored) {}
+        try {
             if (panelView != null && panelView.getWindowToken() != null)
                 wm.removeView(panelView);
         } catch (Exception ignored) {}
-        nativeCancelScan();
+        // Para scan/freeze e SOLTA a referência global do Service no nativo
+        // (antes ela ficava presa na instância morta e a nova nunca recebia callbacks).
+        nativeShutdown();
         nativeClearResults();
         stopForeground(true);
     }
@@ -204,7 +287,7 @@ public class MemoryScannerService extends Service
                 .build();
     }
 
-    // ==================== Bubble flutuante ====================
+    // ==================== Bubble ====================
     private void createBubble() {
         TextView bubble = new TextView(this);
         bubble.setText("🔍");
@@ -297,12 +380,27 @@ public class MemoryScannerService extends Service
         if (btnRegion != null) btnRegion.setText("Ver: " + REGION_NAMES[currentRegion]);
     }
 
-    // ==================== Painel principal ====================
+    private void updateFilterStatus() {
+        if (tvFilterStatus == null) return;
+        StringBuilder sb = new StringBuilder();
+        if (!moduleFilter.isEmpty())    sb.append("📦").append(moduleFilter).append("  ");
+        if (currentRegion != 0)         sb.append("🌐").append(REGION_NAMES[currentRegion]).append("  ");
+        if (pointerStaticOnly)          sb.append("⭐estáticos  ");
+        if (sb.length() == 0) {
+            tvFilterStatus.setText("Sem filtros ativos");
+            tvFilterStatus.setTextColor(0xFF888888);
+        } else {
+            tvFilterStatus.setText("Ativo: " + sb.toString().trim());
+            tvFilterStatus.setTextColor(0xFF66FF66);
+        }
+    }
+
+    // ==================== Painel ====================
     private void createPanel() {
         DisplayMetrics dm = getResources().getDisplayMetrics();
         boolean landscape = dm.widthPixels > dm.heightPixels;
-        int panelWidth  = (int) (dm.widthPixels * (landscape ? 0.66f : 0.94f));
-        int panelHeight = (int) (dm.heightPixels * (landscape ? 0.96f : 0.92f));
+        int panelWidth  = (int) (dm.widthPixels * (landscape ? 0.70f : 0.96f));
+        int panelHeight = (int) (dm.heightPixels * (landscape ? 0.96f : 0.94f));
 
         ScrollView scroll = new ScrollView(this);
         scroll.setBackgroundColor(0xEE222222);
@@ -319,7 +417,7 @@ public class MemoryScannerService extends Service
         tvTitle.setText("Memory Scanner");
         root.addView(tvTitle);
 
-        // Barra de arraste
+        // Drag bar
         LinearLayout dragBar = new LinearLayout(this);
         dragBar.setOrientation(LinearLayout.HORIZONTAL);
         dragBar.setBackgroundColor(0xFF333333);
@@ -342,11 +440,17 @@ public class MemoryScannerService extends Service
 
         tvStatus = new TextView(this);
         tvStatus.setTextColor(0xFFFFFFFF);
-        tvStatus.setPadding(8, 8, 8, 8);
+        tvStatus.setPadding(8, 4, 8, 0);
         tvStatus.setText("Pronto");
         root.addView(tvStatus);
 
-        // Valor principal
+        tvFilterStatus = new TextView(this);
+        tvFilterStatus.setTextColor(0xFF888888);
+        tvFilterStatus.setTextSize(11f);
+        tvFilterStatus.setPadding(8, 0, 8, 4);
+        root.addView(tvFilterStatus);
+
+        // Valor
         LinearLayout row1 = new LinearLayout(this);
         row1.setOrientation(LinearLayout.HORIZONTAL);
         row1.setPadding(0, 8, 0, 8);
@@ -368,7 +472,6 @@ public class MemoryScannerService extends Service
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         root.addView(row1);
 
-        // Valor máximo (modo Faixa)
         LinearLayout row1b = new LinearLayout(this);
         row1b.setOrientation(LinearLayout.HORIZONTAL);
         row1b.setPadding(0, 0, 0, 4);
@@ -391,7 +494,7 @@ public class MemoryScannerService extends Service
         editValue2.setVisibility(View.GONE);
         root.addView(row1b);
 
-        // Tipo / Cond / Região
+        // Tipo / Cond / Ver
         LinearLayout row2 = new LinearLayout(this);
         row2.setOrientation(LinearLayout.HORIZONTAL);
         row2.setPadding(0, 4, 0, 4);
@@ -419,12 +522,13 @@ public class MemoryScannerService extends Service
             currentRegion = (currentRegion + 1) % REGION_NAMES.length;
             nativeSetRegionFilter(REGION_MASKS[currentRegion]);
             updateRegionButton();
+            updateFilterStatus();
         });
         row2.addView(btnRegion,
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         root.addView(row2);
 
-        // Novo Scan / Next / Cancelar
+        // Scan bar
         LinearLayout scanBar = new LinearLayout(this);
         scanBar.setOrientation(LinearLayout.HORIZONTAL);
         scanBar.setPadding(0, 8, 0, 8);
@@ -446,7 +550,7 @@ public class MemoryScannerService extends Service
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         root.addView(scanBar);
 
-        // Escrever / Congelar / Limpar
+        // Actions
         LinearLayout actionBar = new LinearLayout(this);
         actionBar.setOrientation(LinearLayout.HORIZONTAL);
         actionBar.setPadding(0, 4, 0, 4);
@@ -467,7 +571,7 @@ public class MemoryScannerService extends Service
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         root.addView(actionBar);
 
-        // Salvar / Carregar / Ao redor
+        // Extra
         LinearLayout extraBar = new LinearLayout(this);
         extraBar.setOrientation(LinearLayout.HORIZONTAL);
         extraBar.setPadding(0, 4, 0, 4);
@@ -488,44 +592,95 @@ public class MemoryScannerService extends Service
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         root.addView(extraBar);
 
-        // AoB / Pointer / Follow / Watch+ / Watch
-        LinearLayout toolBar = new LinearLayout(this);
-        toolBar.setOrientation(LinearLayout.HORIZONTAL);
-        toolBar.setPadding(0, 4, 0, 4);
+        // Tool 1: scan varieties
+        LinearLayout toolBar1 = new LinearLayout(this);
+        toolBar1.setOrientation(LinearLayout.HORIZONTAL);
+        toolBar1.setPadding(0, 4, 0, 4);
         btnAoB = new Button(this);
         btnAoB.setText("AoB");
         btnAoB.setOnClickListener(this);
-        toolBar.addView(btnAoB,
+        toolBar1.addView(btnAoB,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        btnString = new Button(this);
+        btnString.setText("String");
+        btnString.setOnClickListener(this);
+        toolBar1.addView(btnString,
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         btnPointer = new Button(this);
         btnPointer.setText("Pointer");
         btnPointer.setOnClickListener(this);
-        toolBar.addView(btnPointer,
+        toolBar1.addView(btnPointer,
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        btnSnapshot = new Button(this);
+        btnSnapshot.setText("Snap");
+        btnSnapshot.setOnClickListener(this);
+        toolBar1.addView(btnSnapshot,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(toolBar1);
+
+        // Tool 2: tools & selection
+        LinearLayout toolBar2 = new LinearLayout(this);
+        toolBar2.setOrientation(LinearLayout.HORIZONTAL);
+        toolBar2.setPadding(0, 4, 0, 4);
         btnFollow = new Button(this);
         btnFollow.setText("🔗");
         btnFollow.setOnClickListener(this);
-        toolBar.addView(btnFollow,
+        toolBar2.addView(btnFollow,
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         btnWatchAdd = new Button(this);
         btnWatchAdd.setText("★ Add");
         btnWatchAdd.setOnClickListener(this);
-        toolBar.addView(btnWatchAdd,
+        toolBar2.addView(btnWatchAdd,
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         btnWatchShow = new Button(this);
         btnWatchShow.setText("Watch");
         btnWatchShow.setOnClickListener(this);
-        toolBar.addView(btnWatchShow,
+        toolBar2.addView(btnWatchShow,
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        root.addView(toolBar);
+        btnPaths = new Button(this);
+        btnPaths.setText("Paths");
+        btnPaths.setOnClickListener(this);
+        toolBar2.addView(btnPaths,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        btnModules = new Button(this);
+        btnModules.setText("Módulos");
+        btnModules.setOnClickListener(this);
+        toolBar2.addView(btnModules,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(toolBar2);
+
+        // Tool 3: select all
+        LinearLayout toolBar3 = new LinearLayout(this);
+        toolBar3.setOrientation(LinearLayout.HORIZONTAL);
+        toolBar3.setPadding(0, 4, 0, 4);
+        btnMarkAll = new Button(this);
+        btnMarkAll.setText("✓ Tudo");
+        btnMarkAll.setOnClickListener(this);
+        toolBar3.addView(btnMarkAll,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        btnUnmarkAll = new Button(this);
+        btnUnmarkAll.setText("✗ Nada");
+        btnUnmarkAll.setOnClickListener(this);
+        toolBar3.addView(btnUnmarkAll,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        btnSameOffset = new Button(this);
+        btnSameOffset.setText("↔ Offset");
+        btnSameOffset.setOnClickListener(this);
+        toolBar3.addView(btnSameOffset,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        btnFilterClear = new Button(this);
+        btnFilterClear.setText("Filtros OFF");
+        btnFilterClear.setOnClickListener(this);
+        toolBar3.addView(btnFilterClear,
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(toolBar3);
 
         progressBar = new ProgressBar(this);
         progressBar.setVisibility(View.GONE);
         root.addView(progressBar);
 
-        // ListView com altura adaptativa à orientação
         listView = new ListView(this);
-        int listHeight = (int) (dm.density * (landscape ? 150 : 240));
+        int listHeight = (int) (dm.density * (landscape ? 140 : 220));
         listView.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, listHeight));
         listView.setBackgroundColor(0xFF444444);
@@ -556,6 +711,8 @@ public class MemoryScannerService extends Service
         panelParams.x = 20;
         panelParams.y = 40;
         makeDraggable(dragBar, scroll, panelParams, () -> {});
+
+        updateFilterStatus();
     }
 
     // ==================== Eventos ====================
@@ -580,28 +737,56 @@ public class MemoryScannerService extends Service
             resetResults();
             setStatus("Resultados limpos");
         } else if (v == btnSave) {
-            saveResultsToFile();
+            saveStateToFile();
         } else if (v == btnLoad) {
-            loadResultsFromFile();
+            loadStateFromFile();
         } else if (v == btnVicinity) {
             showVicinity();
         } else if (v == btnAoB) {
             showAoBDialog();
+        } else if (v == btnString) {
+            showStringDialog();
         } else if (v == btnPointer) {
             showPointerDialog();
+        } else if (v == btnSnapshot) {
+            showSnapshotDialog();
         } else if (v == btnFollow) {
             followPointer();
         } else if (v == btnWatchAdd) {
             addCheckedToWatch();
         } else if (v == btnWatchShow) {
             showWatchDialog();
+        } else if (v == btnPaths) {
+            showPathsDialog();
+        } else if (v == btnModules) {
+            showModulesDialog();
+        } else if (v == btnMarkAll) {
+            for (int i = 0; i < displayItems.size(); i++) listView.setItemChecked(i, true);
+        } else if (v == btnUnmarkAll) {
+            for (int i = 0; i < displayItems.size(); i++) listView.setItemChecked(i, false);
+        } else if (v == btnSameOffset) {
+            filterSameOffset();
+        } else if (v == btnFilterClear) {
+            moduleFilter = "";
+            pointerStaticOnly = false;
+            currentRegion = 0;
+            nativeSetModuleFilter("");
+            nativeSetPointerStaticFilter(false);
+            nativeSetRegionFilter(REGION_MASKS[currentRegion]);
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                    .putString(PREF_MODULE_FILTER, "")
+                    .putBoolean(PREF_POINTER_STATIC, false)
+                    .apply();
+            updateRegionButton();
+            updateFilterStatus();
+            toast("Filtros desligados");
         }
     }
 
     @Override
     public void onItemClick(AdapterView<?> parent, View view, int position, long id) { }
 
-    // ==================== Drain coalescido ====================
+    // ==================== Drain ====================
     private void scheduleDrain(long delayMs) {
         if (drainScheduled.compareAndSet(false, true))
             mainHandler.postDelayed(drainTask, delayMs);
@@ -632,6 +817,7 @@ public class MemoryScannerService extends Service
 
     // ==================== Reset / Scan ====================
     private void resetResults() {
+        refinable = false;
         totalAddresses.set(0);
         displayFullNotified = false;
         scanActive = false;
@@ -641,57 +827,86 @@ public class MemoryScannerService extends Service
         if (tvTitle != null) tvTitle.setText("Endereços: 0");
     }
 
+    // Faixa: compara por VALOR (os longs aqui são bits crus no caso de float/double;
+    // comparar os bits invertia qualquer faixa com números negativos).
+    private boolean rangeNeedsSwap(long a, long b, int type) {
+        if (type == TYPE_FLOAT)  return Float.intBitsToFloat((int) a) > Float.intBitsToFloat((int) b);
+        if (type == TYPE_DOUBLE) return Double.longBitsToDouble(a) > Double.longBitsToDouble(b);
+        return a > b;
+    }
+
+    // Parse de hexadecimal SEM sinal (endereços podem ter o bit alto ligado).
+    private static long parseHex(String str) throws NumberFormatException {
+        String t = str.trim();
+        if (t.isEmpty() || t.length() > 16) throw new NumberFormatException("hex: " + str);
+        long v = 0;
+        for (int i = 0; i < t.length(); i++) {
+            int d = Character.digit(t.charAt(i), 16);
+            if (d < 0) throw new NumberFormatException("hex: " + str);
+            v = (v << 4) | d;
+        }
+        return v;
+    }
+
+    // Valor de ponteiro lido da memória (remove a tag do byte alto em 64 bits).
+    private static long ptrFromBytes(byte[] data) {
+        long v = toLong(data, data.length);
+        if (data.length == 8) v &= 0x00FFFFFFFFFFFFFFL;
+        return v;
+    }
+
+    private void beginScanUi(String status) {
+        resetResults();
+        scanActive = true;
+        scheduleDrain(0);
+        setStatus(status);
+        btnCancel.setEnabled(true);
+        progressBar.setVisibility(View.VISIBLE);
+        progressBar.setProgress(0);
+    }
+
+    // O nativo recusou (scan em andamento / entrada inválida): destrava a UI.
+    private void onScanRefused() {
+        scanActive = false;
+        if (progressBar != null) progressBar.setVisibility(View.GONE);
+        if (btnCancel != null) btnCancel.setEnabled(false);
+        setStatus("Não foi possível iniciar (scan em andamento ou entrada inválida)");
+    }
+
     private void startScanInternal() {
-        if (!validateInput()) return;
+        if (scanActive) { toast("Aguarde o scan atual terminar"); return; }
+        if (!validateInput(currentType)) return;
         long value  = parseOne(editValue,  currentType);
         long value2 = (currentCondition == COND_RANGE)
                         ? parseOne(editValue2, currentType) : value;
-        if (currentCondition == COND_RANGE && value2 < value) {
+        if (currentCondition == COND_RANGE && rangeNeedsSwap(value, value2, currentType)) {
             long tmp = value; value = value2; value2 = tmp;
         }
 
         lastScanType = currentType;
-        resetResults();
-        scanActive = true;
-        scheduleDrain(0);
-
-        setStatus("Scanneando...");
-        btnCancel.setEnabled(true);
-        progressBar.setVisibility(View.VISIBLE);
-        progressBar.setIndeterminate(false);
-        progressBar.setProgress(0);
-
-        Log.i(TAG, String.format("startScan v1=%d v2=%d tipo=%d cond=%d reg=%d",
-                value, value2, currentType, currentCondition, currentRegion));
-        nativeStartScan(value, value2, currentType, currentCondition);
+        beginScanUi("Scanneando...");
+        if (!nativeStartScan(value, value2, currentType, currentCondition)) onScanRefused();
     }
 
     private void nextScanInternal() {
-        if (!validateInput()) return;
-        if (totalAddresses.get() == 0) {
-            toast("Nenhum resultado. Faça um Novo Scan primeiro.");
+        if (scanActive) { toast("Aguarde o scan atual terminar"); return; }
+        if (!refinable) {
+            toast("Faça um Novo Scan antes (a lista atual não pode ser refinada).");
             return;
         }
+        // O tipo do refino é SEMPRE o do último scan, vindo do nativo (evita desencontro
+        // quando o botão de tipo foi trocado ou o último scan foi String/AoB).
+        lastScanType = nativeGetLastScanType();
+        if (!validateInput(lastScanType)) return;
         long value  = parseOne(editValue,  lastScanType);
         long value2 = (currentCondition == COND_RANGE)
                         ? parseOne(editValue2, lastScanType) : value;
-        if (currentCondition == COND_RANGE && value2 < value) {
+        if (currentCondition == COND_RANGE && rangeNeedsSwap(value, value2, lastScanType)) {
             long tmp = value; value = value2; value2 = tmp;
         }
 
-        resetResults();
-        scanActive = true;
-        scheduleDrain(0);
-
-        setStatus("Refinando...");
-        btnCancel.setEnabled(true);
-        progressBar.setVisibility(View.VISIBLE);
-        progressBar.setIndeterminate(false);
-        progressBar.setProgress(0);
-
-        Log.i(TAG, String.format("nextScan v1=%d v2=%d cond=%d",
-                value, value2, currentCondition));
-        nativeNextScan(value, value2, currentCondition);
+        beginScanUi("Refinando...");
+        if (!nativeNextScan(value, value2, currentCondition)) onScanRefused();
     }
 
     private List<Integer> getCheckedPositions() {
@@ -705,8 +920,9 @@ public class MemoryScannerService extends Service
     private void writeSelected() {
         List<Integer> positions = getCheckedPositions();
         if (positions.isEmpty()) { toast("Selecione pelo menos um endereço"); return; }
-        if (!validateInput()) return;
-        int type = currentType;
+        // Escreve com o tipo do scan (o da lista), não com o do botão de tipo.
+        final int type = lastScanType;
+        if (!validateOne(editValue, type)) return;
         long value = parseOne(editValue, type);
         byte[] data = convertValueToBytes(value, type);
         if (data == null) { toast("Erro na conversão do valor"); return; }
@@ -723,8 +939,8 @@ public class MemoryScannerService extends Service
     private void freezeSelected() {
         List<Integer> positions = getCheckedPositions();
         if (positions.isEmpty()) { toast("Selecione pelo menos um endereço"); return; }
-        if (!validateInput()) return;
-        int type = currentType;
+        final int type = lastScanType;
+        if (!validateOne(editValue, type)) return;
         long value = parseOne(editValue, type);
         for (int pos : positions) {
             if (pos < 0 || pos >= displayItems.size()) continue;
@@ -735,7 +951,7 @@ public class MemoryScannerService extends Service
     }
 
     // ============================================================
-    //  AoB — diálogo e disparo
+    //  AoB
     // ============================================================
     private void showAoBDialog() {
         EditText input = new EditText(this);
@@ -759,15 +975,14 @@ public class MemoryScannerService extends Service
                 .setPositiveButton("Escanear", (d, w) -> {
                     String pat = input.getText().toString().trim();
                     if (TextUtils.isEmpty(pat)) { toast("Padrão vazio"); return; }
-                    resetResults();
-                    scanActive = true;
-                    scheduleDrain(0);
-                    setStatus("AoB scan...");
-                    btnCancel.setEnabled(true);
-                    progressBar.setVisibility(View.VISIBLE);
-                    progressBar.setProgress(0);
-                    Log.i(TAG, "AoB pattern: " + pat);
-                    nativeAoBScan(pat, DISPLAY_LIMIT);
+                    if (scanActive) { toast("Aguarde o scan atual terminar"); return; }
+                    beginScanUi("AoB scan...");
+                    if (!nativeAoBScan(pat, DISPLAY_LIMIT)) {
+                        onScanRefused();
+                        toast("Padrão inválido. Use bytes hex: FF ?? A? 12");
+                    } else {
+                        lastScanType = nativeGetLastScanType();
+                    }
                 })
                 .setNegativeButton("Cancelar", null)
                 .create();
@@ -776,7 +991,48 @@ public class MemoryScannerService extends Service
     }
 
     // ============================================================
-    //  Pointer scan — diálogo e disparo
+    //  String scan
+    // ============================================================
+    private void showStringDialog() {
+        final EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("Texto a buscar");
+        input.setTextColor(0xFFFFFFFF);
+        input.setHintTextColor(0x88FFFFFF);
+
+        final CheckBox cbUtf16 = new CheckBox(this);
+        cbUtf16.setText("UTF-16LE (senão UTF-8)");
+        cbUtf16.setTextColor(0xFFFFFFFF);
+
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(24, 24, 24, 24);
+        wrap.setBackgroundColor(0xFF222222);
+        wrap.addView(input, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        wrap.addView(cbUtf16);
+
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("String Scan")
+                .setView(wrap)
+                .setPositiveButton("Escanear", (d, w) -> {
+                    String txt = input.getText().toString();
+                    if (txt.isEmpty()) { toast("Digite um texto"); return; }
+                    int enc = cbUtf16.isChecked() ? STR_UTF16LE : STR_UTF8;
+                    if (scanActive) { toast("Aguarde o scan atual terminar"); return; }
+                    beginScanUi("String scan " + (enc == STR_UTF16LE ? "(UTF-16)" : "(UTF-8)") + "...");
+                    if (!nativeStringScan(txt, enc)) onScanRefused();
+                    else lastScanType = nativeGetLastScanType();
+                })
+                .setNegativeButton("Cancelar", null)
+                .create();
+        if (dlg.getWindow() != null) dlg.getWindow().setType(OVERLAY_TYPE);
+        dlg.show();
+    }
+
+    // ============================================================
+    //  Pointer scan
     // ============================================================
     private void showPointerDialog() {
         List<Integer> positions = getCheckedPositions();
@@ -795,8 +1051,7 @@ public class MemoryScannerService extends Service
         input.setTextColor(0xFFFFFFFF);
         input.setHintTextColor(0x88FFFFFF);
         input.setText(suggestion);
-        input.setInputType(InputType.TYPE_CLASS_TEXT |
-                InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
 
         final EditText depthIn = new EditText(this);
         depthIn.setSingleLine(true);
@@ -809,6 +1064,16 @@ public class MemoryScannerService extends Service
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setPadding(24, 24, 24, 24);
         wrap.setBackgroundColor(0xFF222222);
+
+        final TextView tvFilter = new TextView(this);
+        tvFilter.setTextColor(pointerStaticOnly ? 0xFF66FF66 : 0xFFAAAAAA);
+        tvFilter.setTextSize(13f);
+        tvFilter.setPadding(0, 0, 0, 8);
+        tvFilter.setText("Filtro: " + (pointerStaticOnly
+                ? "Só estáticos (libs .so + executáveis)"
+                : "Universal (todas as regiões)"));
+        wrap.addView(tvFilter);
+
         TextView l1 = new TextView(this);
         l1.setText("Endereço alvo:");
         l1.setTextColor(0xFFFFFFFF);
@@ -816,6 +1081,7 @@ public class MemoryScannerService extends Service
         wrap.addView(input, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
+
         TextView l2 = new TextView(this);
         l2.setText("Profundidade (níveis):");
         l2.setTextColor(0xFFFFFFFF);
@@ -825,8 +1091,28 @@ public class MemoryScannerService extends Service
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        final CheckBox cbStatic = new CheckBox(this);
+        cbStatic.setText("Só estáticos (libs .so + executáveis)");
+        cbStatic.setTextColor(0xFFFFFFFF);
+        cbStatic.setPadding(0, 16, 0, 0);
+        cbStatic.setChecked(pointerStaticOnly);
+        cbStatic.setOnCheckedChangeListener((bv, isChecked) -> {
+            pointerStaticOnly = isChecked;
+            nativeSetPointerStaticFilter(pointerStaticOnly);
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(PREF_POINTER_STATIC, pointerStaticOnly)
+                    .apply();
+            tvFilter.setText("Filtro: " + (isChecked
+                    ? "Só estáticos (libs .so + executáveis)"
+                    : "Universal (todas as regiões)"));
+            tvFilter.setTextColor(isChecked ? 0xFF66FF66 : 0xFFAAAAAA);
+            updateFilterStatus();
+        });
+        wrap.addView(cbStatic);
+
         AlertDialog dlg = new AlertDialog.Builder(this)
-                .setTitle("Pointer Scan")
+                .setTitle("Pointer Scan" + (pointerStaticOnly ? " [Só estáticos]" : ""))
                 .setView(wrap)
                 .setPositiveButton("Escanear", (d, w) -> {
                     String s = input.getText().toString().trim();
@@ -834,7 +1120,7 @@ public class MemoryScannerService extends Service
                     long target;
                     try {
                         target = s.startsWith("0x") || s.startsWith("0X")
-                                ? Long.parseLong(s.substring(2), 16)
+                                ? parseHex(s.substring(2))
                                 : Long.parseLong(s);
                     } catch (NumberFormatException e) {
                         toast("Endereço inválido"); return;
@@ -845,20 +1131,134 @@ public class MemoryScannerService extends Service
                     if (depth < 1) depth = 1;
                     if (depth > 4) depth = 4;
 
-                    resetResults();
-                    scanActive = true;
-                    scheduleDrain(0);
-                    setStatus("Pointer scan...");
-                    btnCancel.setEnabled(true);
-                    progressBar.setVisibility(View.VISIBLE);
-                    progressBar.setProgress(0);
-                    Log.i(TAG, "Pointer target=0x" + Long.toHexString(target) + " depth=" + depth);
-                    nativePointerScan(target, depth);
+                    if (scanActive) { toast("Aguarde o scan atual terminar"); return; }
+                    lastPointerTarget = target;
+                    beginScanUi("Pointer scan...");
+                    if (!nativePointerScan(target, depth)) onScanRefused();
                 })
                 .setNegativeButton("Cancelar", null)
                 .create();
         if (dlg.getWindow() != null) dlg.getWindow().setType(OVERLAY_TYPE);
         dlg.show();
+    }
+
+    // ============================================================
+    //  Same-offset filter
+    // ============================================================
+    private void filterSameOffset() {
+        if (displayItems.isEmpty()) { toast("Sem resultados"); return; }
+        if (lastPointerTarget == 0) { toast("Execute um Pointer Scan primeiro"); return; }
+
+        // Conta offsets (target - ptr)
+        Map<Long, Integer> counts = new HashMap<>();
+        for (String item : displayItems) {
+            long addr = extractAddress(item);
+            if (addr == -1) continue;
+            long off = lastPointerTarget - addr;
+            counts.put(off, counts.getOrDefault(off, 0) + 1);
+        }
+        if (counts.isEmpty()) { toast("Sem offsets"); return; }
+
+        long bestOff = 0; int bestCount = 0;
+        for (Map.Entry<Long, Integer> e : counts.entrySet()) {
+            if (e.getValue() > bestCount) { bestCount = e.getValue(); bestOff = e.getKey(); }
+        }
+
+        List<String> filtered = new ArrayList<>();
+        for (String item : displayItems) {
+            long addr = extractAddress(item);
+            if (addr == -1) continue;
+            if ((lastPointerTarget - addr) == bestOff) filtered.add(item);
+        }
+
+        displayItems.clear();
+        displayItems.addAll(filtered);
+        adapter.notifyDataSetChanged();
+        updateTitle();
+        toast("Offset 0x" + Long.toHexString(bestOff) + " — " + filtered.size() + " itens");
+    }
+
+    // ============================================================
+    //  Snapshot dialog
+    // ============================================================
+    private void showSnapshotDialog() {
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(24, 24, 24, 24);
+        wrap.setBackgroundColor(0xFF222222);
+
+        TextView info = new TextView(this);
+        info.setTextColor(0xFFFFFFFF);
+        info.setText("1) Salvar snapshot com os valores atuais.\n" +
+                     "2) Mude o jogo.\n" +
+                     "3) Escolha um filtro abaixo.");
+        wrap.addView(info);
+
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("Snapshot / Diff")
+                .setView(wrap)
+                .setPositiveButton("Salvar snap", (d, w) -> new Thread(() -> {
+                    final int saved = nativeSnapshotSave();
+                    mainHandler.post(() -> toast(saved == -1
+                            ? "Aguarde o scan atual terminar"
+                            : saved < 0 ? "Falha ao salvar snapshot"
+                                        : "Snapshot: " + saved + " valores"));
+                }, "memscan-snap").start())
+                .setNeutralButton("Limpar snap", (d, w) -> {
+                    nativeSnapshotClear();
+                    toast("Snapshot apagado");
+                })
+                .setNegativeButton("Fechar", null)
+                .create();
+        if (dlg.getWindow() != null) dlg.getWindow().setType(OVERLAY_TYPE);
+        dlg.show();
+
+        // Botões de diff, em linha
+        LinearLayout diffRow = new LinearLayout(this);
+        diffRow.setOrientation(LinearLayout.HORIZONTAL);
+        wrap.addView(diffRow);
+
+        String[] labels = {"Mudou", "Igual", "Aumentou", "Diminuiu"};
+        int[] modes = {DIFF_CHANGED, DIFF_UNCHANGED, DIFF_INCREASED, DIFF_DECREASED};
+        for (int i = 0; i < labels.length; i++) {
+            final int mode = modes[i];
+            Button b = new Button(this);
+            b.setText(labels[i]);
+            b.setOnClickListener(v -> {
+                try { dlg.dismiss(); } catch (Exception ignored) {}
+                setStatus("Aplicando diff...");
+                // Fora da UI thread: com muitos resultados isto travava a tela (ANR).
+                new Thread(() -> {
+                    final int count = nativeSnapshotDiff(mode);
+                    if (count < 0) {
+                        mainHandler.post(() -> {
+                            String m = (count == -1) ? "Aguarde o scan atual terminar"
+                                                      : "Sem snapshot salvo";
+                            setStatus(m);
+                            toast(m);
+                        });
+                        return;
+                    }
+                    final long[] addrs = nativeGetResults(DISPLAY_LIMIT);
+                    final int size = getTypeSize(lastScanType);
+                    final List<String> items = new ArrayList<>();
+                    if (addrs != null)
+                        for (long a : addrs) items.add(formatItem(a, nativeReadMemory(a, size)));
+                    mainHandler.post(() -> {
+                        resetResults();
+                        displayItems.addAll(items);
+                        totalAddresses.set(count);
+                        if (adapter != null) adapter.notifyDataSetChanged();
+                        refinable = count > 0;
+                        updateTitle();
+                        setStatus("Diff: " + count + " resultados");
+                        toast("Diff → " + count);
+                    });
+                }, "memscan-diff").start();
+            });
+            diffRow.addView(b, new LinearLayout.LayoutParams(0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        }
     }
 
     // ============================================================
@@ -884,7 +1284,7 @@ public class MemoryScannerService extends Service
     }
 
     // ============================================================
-    //  Watch list — exibir
+    //  Watch list — exibir (com live update)
     // ============================================================
     private void showWatchDialog() {
         if (watchAddrs.isEmpty()) { toast("Watch list vazia"); return; }
@@ -899,6 +1299,11 @@ public class MemoryScannerService extends Service
         final int type = lastScanType;
         final int size = getTypeSize(type);
 
+        // Linhas de UI pra atualizar depois
+        final List<TextView> valueViews = new ArrayList<>();
+        final List<Long>    valueAddrs = new ArrayList<>();
+        final List<Boolean> valueIsPtr = new ArrayList<>();
+
         for (int i = 0; i < list.size(); i++) {
             final long addr = list.get(i);
             LinearLayout row = new LinearLayout(this);
@@ -912,58 +1317,41 @@ public class MemoryScannerService extends Service
             row.addView(tvAddr, new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f));
 
-            boolean isPtr = Boolean.TRUE.equals(watchAddrs.get(addr));
-            long readAt = addr;
-            String chain = "";
-
-            if (isPtr) {
-                byte[] pdata = nativeReadMemory(addr, 4);
-                if (pdata != null) {
-                    long targetAddr = bytesToLong(pdata);
-                    readAt = targetAddr;
-                    chain = String.format("→ 0x%08X  ", targetAddr);
-                } else {
-                    chain = "(falha ptr) ";
-                    readAt = -1;
-                }
-            }
-
-            byte[] data = (readAt >= 0) ? nativeReadMemory(readAt, size) : null;
-            String valStr = chain;
-            long currentVal = 0;
-            if (data != null) {
-                valStr += hexToDisplay(data, type);
-                currentVal = bytesToLong(data);
-            } else {
-                valStr += "--";
-            }
-            final long curVal = currentVal;
-            final long writeAt = (isPtr ? readAt : addr);
-            final String typeName = TYPE_NAMES[type];
+            final boolean isPtr = Boolean.TRUE.equals(watchAddrs.get(addr));
 
             TextView tvVal = new TextView(this);
-            tvVal.setText(valStr);
             tvVal.setTextColor(0xFFFFFFFF);
             tvVal.setTypeface(Typeface.MONOSPACE);
             tvVal.setPadding(0, 8, 8, 8);
             row.addView(tvVal, new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f));
+            valueViews.add(tvVal);
+            valueAddrs.add(addr);
+            valueIsPtr.add(isPtr);
+
+            final long writeAt0;
+            if (isPtr) {
+                byte[] pdata = nativeReadMemory(addr, PTR_SIZE);
+                writeAt0 = (pdata != null) ? ptrFromBytes(pdata) : -1;
+            } else {
+                writeAt0 = addr;
+            }
 
             Button btnEdit = new Button(this);
             btnEdit.setText("✎");
             btnEdit.setMinWidth(0);
             btnEdit.setMinimumWidth(0);
             btnEdit.setPadding(4, 0, 4, 0);
+            final String typeName = TYPE_NAMES[type];
             btnEdit.setOnClickListener(view -> {
-                if (writeAt < 0) { toast("Endereço inválido"); return; }
+                if (writeAt0 < 0) { toast("Endereço inválido"); return; }
                 EditText in = new EditText(MemoryScannerService.this);
-                in.setText(String.valueOf(curVal));
                 in.setTextColor(0xFFFFFFFF);
                 in.setInputType(InputType.TYPE_CLASS_NUMBER |
                         InputType.TYPE_NUMBER_FLAG_DECIMAL |
                         InputType.TYPE_NUMBER_FLAG_SIGNED);
                 AlertDialog ed = new AlertDialog.Builder(MemoryScannerService.this)
-                        .setTitle(String.format("Editar 0x%08X (%s)", writeAt, typeName))
+                        .setTitle(String.format("Editar 0x%08X (%s)", writeAt0, typeName))
                         .setView(in)
                         .setPositiveButton("OK", (d2, w2) -> {
                             String s = in.getText().toString().trim();
@@ -976,13 +1364,11 @@ public class MemoryScannerService extends Service
                                 } else {
                                     parsedVal = Long.parseLong(s);
                                 }
-                            } catch (Exception e) {
-                                toast("Valor inválido"); return;
-                            }
+                            } catch (Exception e) { toast("Valor inválido"); return; }
                             byte[] b = convertValueToBytes(parsedVal, type);
-                            if (b != null && nativeWriteMemory(writeAt, b))
-                                toast("Escrito em " + String.format("0x%08X", writeAt));
-                            else toast("Falha ao escrever");
+                            if (b != null && nativeWriteMemory(writeAt0, b))
+                                toast("Escrito em " + String.format("0x%08X", writeAt0));
+                            else toast("Falha");
                         })
                         .setNegativeButton("Cancelar", null)
                         .create();
@@ -1007,6 +1393,56 @@ public class MemoryScannerService extends Service
             container.addView(row);
         }
 
+        // Botões freeze all / unfreeze all
+        LinearLayout bulk = new LinearLayout(this);
+        bulk.setOrientation(LinearLayout.HORIZONTAL);
+        bulk.setPadding(0, 8, 0, 0);
+
+        Button btnFreezeAll = new Button(this);
+        btnFreezeAll.setText("❄ Congelar todos");
+        btnFreezeAll.setOnClickListener(v -> {
+            int n = 0;
+            for (Long a : watchAddrs.keySet()) {
+                boolean isPtr = Boolean.TRUE.equals(watchAddrs.get(a));
+                long readAt = a;
+                if (isPtr) {
+                    byte[] pdata = nativeReadMemory(a, PTR_SIZE);
+                    if (pdata == null) continue;
+                    readAt = ptrFromBytes(pdata);
+                }
+                byte[] data = nativeReadMemory(readAt, size);
+                if (data == null) continue;
+                long val = bytesToLong(data);
+                nativeToggleFreeze(readAt, val, type, true);
+                n++;
+            }
+            toast("Congelados " + n);
+        });
+        bulk.addView(btnFreezeAll, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        Button btnUnfreezeAll = new Button(this);
+        btnUnfreezeAll.setText("♨ Descon. todos");
+        btnUnfreezeAll.setOnClickListener(v -> {
+            int n = 0;
+            for (Long a : watchAddrs.keySet()) {
+                boolean isPtr = Boolean.TRUE.equals(watchAddrs.get(a));
+                long readAt = a;
+                if (isPtr) {
+                    byte[] pdata = nativeReadMemory(a, PTR_SIZE);
+                    if (pdata == null) continue;
+                    readAt = ptrFromBytes(pdata);
+                }
+                nativeToggleFreeze(readAt, 0, type, false);
+                n++;
+            }
+            toast("Descongelados " + n);
+        });
+        bulk.addView(btnUnfreezeAll, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        container.addView(bulk);
+
         ScrollView sv = new ScrollView(this);
         sv.setBackgroundColor(0xFF222222);
         sv.addView(container);
@@ -1023,55 +1459,337 @@ public class MemoryScannerService extends Service
             View child = container.getChildAt(i);
             if (child instanceof LinearLayout) {
                 LinearLayout r = (LinearLayout) child;
-                for (int j = 0; j < r.getChildCount(); j++) {
+                for (int j = 0; j < r.getChildCount(); j++)
                     r.getChildAt(j).setTag(dlg);
-                }
             }
         }
+
+        // ---- Live update ----
+        final boolean[] running = {true};
+        final Runnable update = new Runnable() {
+            @Override public void run() {
+                if (!running[0]) return;
+                for (int i = 0; i < valueViews.size(); i++) {
+                    long addr = valueAddrs.get(i);
+                    boolean isPtr = valueIsPtr.get(i);
+                    long readAt = addr;
+                    String chain = "";
+                    if (isPtr) {
+                        byte[] pdata = nativeReadMemory(addr, PTR_SIZE);
+                        if (pdata != null) {
+                            readAt = ptrFromBytes(pdata);
+                            chain = String.format("→ 0x%08X  ", readAt);
+                        } else {
+                            valueViews.get(i).setText("(falha ptr)");
+                            continue;
+                        }
+                    }
+                    byte[] data = nativeReadMemory(readAt, size);
+                    if (data != null) {
+                        valueViews.get(i).setText(chain + hexToDisplay(data, type));
+                    } else {
+                        valueViews.get(i).setText(chain + "--");
+                    }
+                }
+                mainHandler.postDelayed(this, 500);
+            }
+        };
+        mainHandler.post(update);
+
+        dlg.setOnDismissListener(d -> running[0] = false);
     }
 
     // ============================================================
     //  Watch list — persistência
     // ============================================================
     private void saveWatch() {
-        try {
-            File f = new File(getFilesDir(), "watch.txt");
-            FileWriter fw = new FileWriter(f);
+        File f = new File(getFilesDir(), "watch.txt");
+        try (FileWriter fw = new FileWriter(f)) {
             for (Map.Entry<Long, Boolean> e : watchAddrs.entrySet()) {
                 fw.write(Long.toHexString(e.getKey()) + ":" +
                          (e.getValue() ? "1" : "0") + "\n");
             }
-            fw.close();
-        } catch (IOException e) {
+        } catch (Exception e) {
             Log.e(TAG, "saveWatch", e);
         }
     }
 
     private void loadWatch() {
-        try {
-            File f = new File(getFilesDir(), "watch.txt");
-            if (!f.exists()) return;
-            BufferedReader br = new BufferedReader(new FileReader(f));
+        File f = new File(getFilesDir(), "watch.txt");
+        if (!f.exists()) return;
+        try (BufferedReader br = new BufferedReader(new FileReader(f))) {
             String line;
             while ((line = br.readLine()) != null) {
                 line = line.trim();
                 if (line.isEmpty()) continue;
                 try {
                     String[] parts = line.split(":");
-                    long a = Long.parseLong(parts[0], 16);
+                    long a = parseHex(parts[0]);
                     boolean p = parts.length > 1 && "1".equals(parts[1]);
                     watchAddrs.put(a, p);
                 } catch (NumberFormatException ignored) {}
             }
-            br.close();
-            Log.i(TAG, "Watch carregada: " + watchAddrs.size());
-        } catch (IOException e) {
+        } catch (Exception e) {
             Log.e(TAG, "loadWatch", e);
         }
     }
 
     // ============================================================
-    //  Seguir pointer — dereferencia e oferece ações no alvo
+    //  Pointer Paths — diálogo
+    // ============================================================
+    private void showPathsDialog() {
+        final LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setBackgroundColor(0xFF222222);
+        container.setPadding(16, 16, 16, 16);
+
+        if (pointerPaths.isEmpty()) {
+            TextView tv = new TextView(this);
+            tv.setText("Nenhum caminho salvo.\n\nPara criar: faça um Pointer Scan, marque um resultado L1 e toque em 🔗 → Salvar caminho.");
+            tv.setTextColor(0xFFAAAAAA);
+            container.addView(tv);
+        }
+
+        final int type = lastScanType;
+        final int size = getTypeSize(type);
+
+        for (int i = 0; i < pointerPaths.size(); i++) {
+            final int idx = i;
+            final PointerPath pp = pointerPaths.get(i);
+
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+
+            StringBuilder sb = new StringBuilder();
+            sb.append(pp.module).append("+0x").append(Long.toHexString(pp.baseOffset));
+            for (int off : pp.offsets)
+                sb.append(" →+0x").append(Integer.toHexString(off));
+
+            TextView tv = new TextView(this);
+            tv.setText(sb.toString());
+            tv.setTextColor(0xFFFFFFFF);
+            tv.setTypeface(Typeface.MONOSPACE);
+            tv.setTextSize(12f);
+            tv.setPadding(0, 8, 8, 8);
+            row.addView(tv, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            Button btnResolve = new Button(this);
+            btnResolve.setText("↻");
+            btnResolve.setMinWidth(0);
+            btnResolve.setMinimumWidth(0);
+            btnResolve.setOnClickListener(v -> {
+                long base = nativeGetModuleBase(pp.module);
+                if (base == 0) { toast("Módulo não encontrado"); return; }
+                long resolved = nativeResolvePointerPath(base + pp.baseOffset, pp.offsets);
+                if (resolved == 0) { toast("Falha ao resolver"); return; }
+                byte[] data = nativeReadMemory(resolved, size);
+                String val = data != null ? formatAs(data, type) : "?";
+                toast(String.format("→ 0x%08X = %s", resolved, val));
+                // Também coloca na lista pra ficar visível
+                displayItems.add(0, String.format("0x%08X  %s",
+                        resolved, data != null ? bytesToHex(data) : "?"));
+                adapter.notifyDataSetChanged();
+            });
+            row.addView(btnResolve);
+
+            Button btnEdit = new Button(this);
+            btnEdit.setText("✎");
+            btnEdit.setMinWidth(0);
+            btnEdit.setMinimumWidth(0);
+            btnEdit.setOnClickListener(v -> editPathDialog(idx));
+            row.addView(btnEdit);
+
+            Button btnRm = new Button(this);
+            btnRm.setText("✕");
+            btnRm.setMinWidth(0);
+            btnRm.setMinimumWidth(0);
+            btnRm.setOnClickListener(v -> {
+                pointerPaths.remove(idx);
+                toast("Removido");
+                try { ((AlertDialog) v.getTag()).dismiss(); } catch (Exception ignored) {}
+            });
+            row.addView(btnRm);
+
+            container.addView(row);
+        }
+
+        ScrollView sv = new ScrollView(this);
+        sv.setBackgroundColor(0xFF222222);
+        sv.addView(container);
+
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("Pointer Paths (" + pointerPaths.size() + ")")
+                .setView(sv)
+                .setPositiveButton("+ Novo", (d, w) -> editPathDialog(-1))
+                .setNegativeButton("Fechar", null)
+                .create();
+        if (dlg.getWindow() != null) dlg.getWindow().setType(OVERLAY_TYPE);
+        dlg.show();
+
+        for (int i = 0; i < container.getChildCount(); i++) {
+            View child = container.getChildAt(i);
+            if (child instanceof LinearLayout) {
+                LinearLayout r = (LinearLayout) child;
+                for (int j = 0; j < r.getChildCount(); j++)
+                    r.getChildAt(j).setTag(dlg);
+            }
+        }
+    }
+
+    private void editPathDialog(int editIdx) {
+        PointerPath init = (editIdx >= 0 && editIdx < pointerPaths.size())
+                ? pointerPaths.get(editIdx) : null;
+
+        final EditText eModule = new EditText(this);
+        eModule.setSingleLine(true);
+        eModule.setHint("libil2cpp.so");
+        eModule.setTextColor(0xFFFFFFFF);
+        if (init != null) eModule.setText(init.module);
+
+        final EditText eBase = new EditText(this);
+        eBase.setSingleLine(true);
+        eBase.setHint("0x1234");
+        eBase.setTextColor(0xFFFFFFFF);
+        if (init != null) eBase.setText("0x" + Long.toHexString(init.baseOffset));
+
+        final EditText eOffsets = new EditText(this);
+        eOffsets.setSingleLine(true);
+        eOffsets.setHint("0x10, 0x20");
+        eOffsets.setTextColor(0xFFFFFFFF);
+        if (init != null) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < init.offsets.length; i++) {
+                if (i > 0) sb.append(", ");
+                sb.append("0x").append(Integer.toHexString(init.offsets[i]));
+            }
+            eOffsets.setText(sb.toString());
+        } else {
+            eOffsets.setText("0x0");
+        }
+
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(24, 24, 24, 24);
+        wrap.setBackgroundColor(0xFF222222);
+
+        wrap.addView(mkLabel("Módulo:"));
+        wrap.addView(eModule);
+        wrap.addView(mkLabel("Base offset:"));
+        wrap.addView(eBase);
+        wrap.addView(mkLabel("Offsets (separados por vírgula):"));
+        wrap.addView(eOffsets);
+
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle(editIdx < 0 ? "Novo Pointer Path" : "Editar Pointer Path")
+                .setView(wrap)
+                .setPositiveButton("Salvar", (d, w) -> {
+                    String mod = eModule.getText().toString().trim();
+                    if (mod.isEmpty()) { toast("Módulo vazio"); return; }
+                    long baseOff;
+                    try { baseOff = parseHexOrDec(eBase.getText().toString().trim()); }
+                    catch (Exception e) { toast("Base inválida"); return; }
+                    String[] tokens = eOffsets.getText().toString().split(",");
+                    List<Integer> offs = new ArrayList<>();
+                    for (String t : tokens) {
+                        t = t.trim();
+                        if (t.isEmpty()) continue;
+                        try { offs.add((int)parseHexOrDec(t)); }
+                        catch (Exception e) { toast("Offset inválido: " + t); return; }
+                    }
+                    if (offs.isEmpty()) offs.add(0);
+                    int[] arr = new int[offs.size()];
+                    for (int i = 0; i < offs.size(); i++) arr[i] = offs.get(i);
+
+                    PointerPath pp = new PointerPath();
+                    pp.module = mod;
+                    pp.baseOffset = baseOff;
+                    pp.offsets = arr;
+
+                    if (editIdx >= 0) pointerPaths.set(editIdx, pp);
+                    else pointerPaths.add(pp);
+                    toast("Path salvo");
+                })
+                .setNegativeButton("Cancelar", null)
+                .create();
+        if (dlg.getWindow() != null) dlg.getWindow().setType(OVERLAY_TYPE);
+        dlg.show();
+    }
+
+    private TextView mkLabel(String txt) {
+        TextView t = new TextView(this);
+        t.setText(txt);
+        t.setTextColor(0xFFFFFFFF);
+        t.setPadding(0, 12, 0, 0);
+        return t;
+    }
+
+    private static long parseHexOrDec(String s) {
+        s = s.trim();
+        if (s.startsWith("0x") || s.startsWith("0X")) return parseHex(s.substring(2));
+        return Long.parseLong(s);
+    }
+
+    // ============================================================
+    //  Módulos
+    // ============================================================
+    private void showModulesDialog() {
+        String[] mods = nativeListModules();
+        if (mods == null) mods = new String[0];
+
+        final LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setBackgroundColor(0xFF222222);
+        container.setPadding(16, 16, 16, 16);
+
+        TextView info = new TextView(this);
+        info.setTextColor(0xFFAAAAAA);
+        info.setText("Toque para filtrar todos os scans por este módulo.\n" +
+                     "Atual: " + (moduleFilter.isEmpty() ? "(nenhum)" : moduleFilter));
+        container.addView(info);
+
+        final AlertDialog[] dlgRef = new AlertDialog[1];
+
+        for (final String m : mods) {
+            Button b = new Button(this);
+            b.setText(m);
+            b.setAllCaps(false);
+            b.setOnClickListener(v -> {
+                moduleFilter = m;
+                nativeSetModuleFilter(moduleFilter);
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                        .putString(PREF_MODULE_FILTER, moduleFilter).apply();
+                updateFilterStatus();
+                toast("Filtro: " + m);
+                if (dlgRef[0] != null) dlgRef[0].dismiss();
+            });
+            container.addView(b);
+        }
+
+        ScrollView sv = new ScrollView(this);
+        sv.setBackgroundColor(0xFF222222);
+        sv.addView(container);
+
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("Módulos carregados (" + mods.length + ")")
+                .setView(sv)
+                .setPositiveButton("Limpar filtro", (d, w) -> {
+                    moduleFilter = "";
+                    nativeSetModuleFilter("");
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                            .putString(PREF_MODULE_FILTER, "").apply();
+                    updateFilterStatus();
+                    toast("Filtro de módulo removido");
+                })
+                .setNegativeButton("Fechar", null)
+                .create();
+        if (dlg.getWindow() != null) dlg.getWindow().setType(OVERLAY_TYPE);
+        dlg.show();
+        dlgRef[0] = dlg;
+    }
+
+    // ============================================================
+    //  Follow pointer
     // ============================================================
     private void followPointer() {
         List<Integer> positions = getCheckedPositions();
@@ -1090,9 +1808,9 @@ public class MemoryScannerService extends Service
         long ptrAddr = extractAddress(item);
         if (ptrAddr == -1) { toast("Endereço do pointer inválido"); return; }
 
-        byte[] ptrData = nativeReadMemory(ptrAddr, 4);
+        byte[] ptrData = nativeReadMemory(ptrAddr, PTR_SIZE);
         if (ptrData == null) { toast("Falha ao ler o pointer"); return; }
-        final long targetAddr = bytesToLong(ptrData);
+        final long targetAddr = ptrFromBytes(ptrData);
         if (targetAddr == 0) { toast("Pointer aponta para NULL"); return; }
 
         final int type = lastScanType;
@@ -1115,10 +1833,10 @@ public class MemoryScannerService extends Service
         info.setTextIsSelectable(true);
         wrap.addView(info);
 
-        TextView infoTipo = new TextView(this);
-        infoTipo.setText("\nTipo: " + TYPE_NAMES[type]);
-        infoTipo.setTextColor(0xFFAAAAAA);
-        wrap.addView(infoTipo);
+        Button btnSavePath = new Button(this);
+        btnSavePath.setText("💾 Salvar como Pointer Path");
+        btnSavePath.setOnClickListener(v -> trySavePointerPath(ptrAddr, targetAddr));
+        wrap.addView(btnSavePath);
 
         AlertDialog dlg = new AlertDialog.Builder(this)
                 .setTitle("🔗 Seguir Pointer")
@@ -1158,10 +1876,36 @@ public class MemoryScannerService extends Service
                 .create();
         if (dlg.getWindow() != null) dlg.getWindow().setType(OVERLAY_TYPE);
         dlg.show();
+
+    }
+
+    private void trySavePointerPath(long ptrAddr, long targetAddr) {
+        String mod = nativeFindModuleForAddr(ptrAddr);
+        if (mod == null || mod.isEmpty()) {
+            toast("Pointer não está em módulo file-backed");
+            return;
+        }
+        long base = nativeGetModuleBase(mod);
+        if (base == 0) { toast("Base do módulo não encontrada"); return; }
+
+        PointerPath pp = new PointerPath();
+        pp.module = mod;
+        pp.baseOffset = ptrAddr - base;
+        pp.offsets = new int[]{0};
+
+        // Verifica se resolve igual
+        long resolved = nativeResolvePointerPath(base + pp.baseOffset, pp.offsets);
+        if (resolved != targetAddr) {
+            toast("Path não resolve (0x" + Long.toHexString(resolved) + " ≠ 0x"
+                    + Long.toHexString(targetAddr) + ")");
+            return;
+        }
+        pointerPaths.add(pp);
+        toast("Path salvo: " + mod + "+0x" + Long.toHexString(pp.baseOffset));
     }
 
     // ============================================================
-    //  Ao redor (vicinity)
+    //  Vicinity
     // ============================================================
     private void showVicinity() {
         List<Integer> positions = getCheckedPositions();
@@ -1266,7 +2010,6 @@ public class MemoryScannerService extends Service
                     btnE.setText("✎");
                     btnE.setMinWidth(0);
                     btnE.setMinimumWidth(0);
-                    btnE.setPadding(6, 0, 6, 0);
                     final String currentStr = numStr;
                     btnE.setOnClickListener(v -> {
                         EditText in = new EditText(svc);
@@ -1302,7 +2045,6 @@ public class MemoryScannerService extends Service
                     btnF.setText("❄");
                     btnF.setMinWidth(0);
                     btnF.setMinimumWidth(0);
-                    btnF.setPadding(6, 0, 6, 0);
                     btnF.setOnClickListener(v -> {
                         String s = tvV.getText().toString();
                         byte[] b = parseToBytes(s, vt, step);
@@ -1347,7 +2089,7 @@ public class MemoryScannerService extends Service
         dlg.show();
     }
 
-    // ==================== Conversores para a UI ====================
+    // ==================== Conversores ====================
     private String formatAs(byte[] data, int type) {
         try {
             switch (type) {
@@ -1395,30 +2137,47 @@ public class MemoryScannerService extends Service
 
     private String hexToDisplay(byte[] data, int type) {
         if (data == null) return "--";
-        StringBuilder sb = new StringBuilder();
-        for (byte b : data) sb.append(String.format("%02X", b));
-        return sb.toString();
+        return bytesToHex(data);
     }
 
     private long bytesToLong(byte[] data) { return toLong(data, data.length); }
 
-    // ==================== Refresh da lista ====================
+    // ==================== Refresh ====================
+    // Fora da UI thread: antes eram até 100k chamadas JNI + String.format na main (ANR).
     private void refreshDisplayValues() {
-        List<String> newItems = new ArrayList<>(displayItems.size());
-        int type = lastScanType;
-        int size = getTypeSize(type);
-        for (String item : displayItems) {
-            long addr = extractAddress(item);
-            if (addr != -1) {
-                byte[] data = nativeReadMemory(addr, size);
-                if (data != null)
-                    newItems.add(String.format("0x%08X  %s", addr, bytesToHex(data)));
-                else newItems.add(item);
-            } else newItems.add(item);
+        final List<String> snap = new ArrayList<>(displayItems);
+        final int defSize = getTypeSize(lastScanType);
+        new Thread(() -> {
+            final List<String> out = new ArrayList<>(snap.size());
+            for (String item : snap) out.add(refreshItem(item, defSize));
+            mainHandler.post(() -> {
+                if (adapter == null || displayItems.size() != snap.size()) return;
+                displayItems.clear();
+                displayItems.addAll(out);
+                adapter.notifyDataSetChanged();
+            });
+        }, "memscan-refresh").start();
+    }
+
+    private String refreshItem(String item, int defSize) {
+        long addr = extractAddress(item);
+        if (addr == -1) return item;
+        // mantém o tamanho exibido (AoB/String têm mais de 1 byte; pointer mostra o valor lido)
+        int size = defSize;
+        int sp = item.lastIndexOf(' ');
+        if (sp >= 0) {
+            String tok = item.substring(sp + 1);
+            if (tok.length() >= 2 && tok.length() % 2 == 0 && tok.length() <= 64
+                    && tok.matches("[0-9A-Fa-f]+")) size = tok.length() / 2;
         }
-        displayItems.clear();
-        displayItems.addAll(newItems);
-        adapter.notifyDataSetChanged();
+        byte[] data = nativeReadMemory(addr, size);
+        if (data == null) return item;
+        if (isPointerResult(item)) {
+            int sp2 = item.indexOf(' ');
+            String lvl = sp2 > 1 ? item.substring(1, sp2) : "0";
+            return "L" + lvl + " 0x" + addrHex(addr) + "  →  " + bytesToHex(data);
+        }
+        return formatItem(addr, data);
     }
 
     private int getTypeSize(int type) {
@@ -1434,9 +2193,9 @@ public class MemoryScannerService extends Service
     }
 
     // ==================== Validação ====================
-    private boolean validateInput() {
-        if (!validateOne(editValue, currentType)) return false;
-        if (currentCondition == COND_RANGE && !validateOne(editValue2, currentType))
+    private boolean validateInput(int type) {
+        if (!validateOne(editValue, type)) return false;
+        if (currentCondition == COND_RANGE && !validateOne(editValue2, type))
             return false;
         return true;
     }
@@ -1446,9 +2205,27 @@ public class MemoryScannerService extends Service
         String val = et.getText().toString().trim();
         if (TextUtils.isEmpty(val)) { toast("Digite um valor"); return false; }
         try {
-            if (type == TYPE_FLOAT)        Float.parseFloat(val);
-            else if (type == TYPE_DOUBLE)  Double.parseDouble(val);
-            else                            Long.parseLong(val);
+            if (type == TYPE_FLOAT) {
+                float f = Float.parseFloat(val);
+                if (Float.isNaN(f) || Float.isInfinite(f)) throw new NumberFormatException();
+            } else if (type == TYPE_DOUBLE) {
+                double d = Double.parseDouble(val);
+                if (Double.isNaN(d) || Double.isInfinite(d)) throw new NumberFormatException();
+            } else {
+                long v = Long.parseLong(val);
+                long min, max;
+                switch (type) {
+                    case TYPE_BYTE:  min = -128;              max = 255;               break;
+                    case TYPE_SHORT: min = Short.MIN_VALUE;   max = Short.MAX_VALUE;   break;
+                    case TYPE_INT:   min = Integer.MIN_VALUE; max = Integer.MAX_VALUE; break;
+                    default:         min = Long.MIN_VALUE;    max = Long.MAX_VALUE;    break;
+                }
+                if (v < min || v > max) {
+                    // antes o valor era truncado em silêncio (ex.: Int 5000000000)
+                    toast("Fora da faixa de " + TYPE_NAMES[type] + " (" + min + " a " + max + ")");
+                    return false;
+                }
+            }
         } catch (NumberFormatException e) {
             toast("Valor inválido");
             return false;
@@ -1485,19 +2262,17 @@ public class MemoryScannerService extends Service
                 char c = display.charAt(end);
                 if ((c >= '0' && c <= '9') ||
                     (c >= 'A' && c <= 'F') ||
-                    (c >= 'a' && c <= 'f')) {
-                    end++;
-                } else break;
+                    (c >= 'a' && c <= 'f')) end++;
+                else break;
             }
             if (end == start + 2) return -1;
-            return Long.parseLong(display.substring(start + 2, end), 16);
+            return parseHex(display.substring(start + 2, end));
         } catch (Exception e) { return -1; }
     }
 
     private boolean isPointerResult(String display) {
         if (display == null || display.length() < 2) return false;
-        return display.charAt(0) == 'L' &&
-               Character.isDigit(display.charAt(1));
+        return display.charAt(0) == 'L' && Character.isDigit(display.charAt(1));
     }
 
     private void toast(String msg) { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show(); }
@@ -1513,10 +2288,23 @@ public class MemoryScannerService extends Service
             tvTitle.setText("Endereços: " + total);
     }
 
+    private static final char[] HEX = "0123456789ABCDEF".toCharArray();
+
+    private static String addrHex(long a) {
+        StringBuilder sb = new StringBuilder(16);
+        boolean started = false;
+        for (int shift = 60; shift >= 0; shift -= 4) {
+            int d = (int) ((a >>> shift) & 0xF);
+            if (d != 0) started = true;
+            if (started || shift < 32) sb.append(HEX[d]);   // no mínimo 8 dígitos
+        }
+        return sb.toString();
+    }
+
     private String formatItem(long addr, byte[] value) {
         StringBuilder sb = new StringBuilder(24);
-        sb.append(String.format("0x%08X", addr)).append("  ");
-        if (value != null) for (byte b : value) sb.append(String.format("%02X", b));
+        sb.append("0x").append(addrHex(addr)).append("  ");
+        if (value != null) sb.append(bytesToHex(value));
         else sb.append("?");
         return sb.toString();
     }
@@ -1546,7 +2334,7 @@ public class MemoryScannerService extends Service
         if (displayItems.size() >= DISPLAY_LIMIT) return;
 
         synchronized (incomingLock) {
-            int bound = Math.max(0, DISPLAY_LIMIT * 2 - incomingItems.size());
+            int bound = Math.max(0, DISPLAY_LIMIT - incomingItems.size());
             int n = Math.min(batchAddrs.length, bound);
             for (int i = 0; i < n; i++) {
                 byte[] v = (batchVals != null && i < batchVals.length) ? batchVals[i] : null;
@@ -1563,14 +2351,13 @@ public class MemoryScannerService extends Service
         if (displayItems.size() >= DISPLAY_LIMIT) return;
 
         synchronized (incomingLock) {
-            int bound = Math.max(0, DISPLAY_LIMIT * 2 - incomingItems.size());
+            int bound = Math.max(0, DISPLAY_LIMIT - incomingItems.size());
             int n = Math.min(addrs.length, bound);
             for (int i = 0; i < n; i++) {
                 int lvl = (levels != null && i < levels.length) ? levels[i] : 0;
                 byte[] v = nativeReadMemory(addrs[i], 4);
                 incomingItems.add(String.format("L%d 0x%08X  →  %s",
-                        lvl, addrs[i],
-                        v != null ? bytesToHex(v) : "?"));
+                        lvl, addrs[i], v != null ? bytesToHex(v) : "?"));
             }
         }
         scheduleDrain(0);
@@ -1581,9 +2368,11 @@ public class MemoryScannerService extends Service
             scanActive = false;
             drainIncomingToUi();
             totalAddresses.set(totalCount);
+            refinable = false;   // resultado de pointer scan não é refinável pelo Next Scan
             if (progressBar != null) progressBar.setVisibility(View.GONE);
             if (btnCancel != null) btnCancel.setEnabled(false);
-            setStatus("Pointer concluído — " + totalCount + " hits");
+            setStatus("Pointer concluído — " + totalCount + " hits"
+                    + (pointerStaticOnly ? " [estáticos]" : ""));
             updateTitle();
         });
     }
@@ -1593,6 +2382,8 @@ public class MemoryScannerService extends Service
             scanActive = false;
             drainIncomingToUi();
             totalAddresses.set(totalCount);
+            lastScanType = nativeGetLastScanType();
+            refinable = totalCount > 0;
             if (progressBar != null) progressBar.setVisibility(View.GONE);
             if (btnCancel != null) btnCancel.setEnabled(false);
             String msg = memoryExhausted
@@ -1605,47 +2396,147 @@ public class MemoryScannerService extends Service
 
     private String bytesToHex(byte[] bytes) {
         if (bytes == null) return "?";
-        StringBuilder sb = new StringBuilder();
-        for (byte b : bytes) sb.append(String.format("%02X", b));
-        return sb.toString();
+        char[] out = new char[bytes.length * 2];
+        for (int i = 0; i < bytes.length; i++) {
+            int v = bytes[i] & 0xFF;
+            out[i * 2]     = HEX[v >>> 4];
+            out[i * 2 + 1] = HEX[v & 0x0F];
+        }
+        return new String(out);
     }
 
-    // ==================== Salvar / carregar resultados ====================
-    private void saveResultsToFile() {
-        try {
-            File file = new File(getFilesDir(), "results.txt");
-            FileWriter fw = new FileWriter(file);
-            for (String item : displayItems) fw.write(item + "\n");
-            fw.close();
-            toast("Salvos " + displayItems.size());
-        } catch (IOException e) {
-            Log.e(TAG, "Erro ao salvar", e);
-            toast("Erro: " + e.getMessage());
-        }
+    // ==================== State JSON ====================
+    private void saveStateToFile() {
+        // Copia na UI thread e grava em outra thread (antes: JSON grande na main, sem atomicidade).
+        final List<String> resultsCopy = new ArrayList<>(displayItems);
+        final Map<Long, Boolean> watchCopy = new LinkedHashMap<>(watchAddrs);
+        final List<PointerPath> pathsCopy = new ArrayList<>(pointerPaths);
+        new Thread(() -> {
+            try {
+                JSONObject root = new JSONObject();
+                root.put("version", 2);
+
+                JSONArray results = new JSONArray();
+                for (String it : resultsCopy) results.put(it);
+                root.put("results", results);
+
+                JSONArray watchArr = new JSONArray();
+                for (Map.Entry<Long, Boolean> e : watchCopy.entrySet()) {
+                    JSONObject w = new JSONObject();
+                    w.put("addr", Long.toHexString(e.getKey()));
+                    w.put("ptr", e.getValue());
+                    watchArr.put(w);
+                }
+                root.put("watch", watchArr);
+
+                JSONArray pathsArr = new JSONArray();
+                for (PointerPath p : pathsCopy) {
+                    JSONObject o = new JSONObject();
+                    o.put("module", p.module == null ? "" : p.module);
+                    o.put("base", Long.toHexString(p.baseOffset));
+                    JSONArray offs = new JSONArray();
+                    for (int oo : p.offsets) offs.put(oo);
+                    o.put("offsets", offs);
+                    pathsArr.put(o);
+                }
+                root.put("paths", pathsArr);
+
+                File f   = new File(getFilesDir(), "state.json");
+                File tmp = new File(getFilesDir(), "state.json.tmp");
+                try (java.io.Writer fw = new java.io.OutputStreamWriter(
+                        new java.io.FileOutputStream(tmp), java.nio.charset.StandardCharsets.UTF_8)) {
+                    fw.write(root.toString());
+                }
+                if (!tmp.renameTo(f)) {
+                    f.delete();
+                    if (!tmp.renameTo(f)) throw new java.io.IOException("não foi possível gravar state.json");
+                }
+                final String msg = "Salvo: " + resultsCopy.size() + " resultados, "
+                        + watchCopy.size() + " watch, " + pathsCopy.size() + " paths";
+                mainHandler.post(() -> toast(msg));
+            } catch (Exception e) {
+                Log.e(TAG, "saveState", e);
+                final String m = "Erro: " + e.getMessage();
+                mainHandler.post(() -> toast(m));
+            }
+        }, "memscan-save").start();
     }
 
-    private void loadResultsFromFile() {
-        try {
-            File file = new File(getFilesDir(), "results.txt");
-            if (!file.exists()) { toast("Arquivo não encontrado"); return; }
-            BufferedReader br = new BufferedReader(new FileReader(file));
-            displayItems.clear();
-            String line;
-            while ((line = br.readLine()) != null) displayItems.add(line);
-            br.close();
-            totalAddresses.set(displayItems.size());
-            adapter.notifyDataSetChanged();
-            updateTitle();
-            toast("Carregados " + displayItems.size());
-        } catch (IOException e) {
-            Log.e(TAG, "Erro ao carregar", e);
-            toast("Erro: " + e.getMessage());
-        }
+    private void loadStateFromFile() {
+        if (scanActive) { toast("Aguarde o scan atual terminar"); return; }
+        new Thread(() -> {
+            try {
+                File f = new File(getFilesDir(), "state.json");
+                if (!f.exists()) { mainHandler.post(() -> toast("state.json não encontrado")); return; }
+                StringBuilder sb = new StringBuilder();
+                try (BufferedReader br = new BufferedReader(new java.io.InputStreamReader(
+                        new java.io.FileInputStream(f), java.nio.charset.StandardCharsets.UTF_8))) {
+                    char[] buf = new char[8192];
+                    int n;
+                    while ((n = br.read(buf)) > 0) sb.append(buf, 0, n);
+                }
+                JSONObject root = new JSONObject(sb.toString());
+
+                final List<String> items = new ArrayList<>();
+                JSONArray results = root.optJSONArray("results");
+                if (results != null) {
+                    for (int i = 0; i < results.length() && items.size() < DISPLAY_LIMIT; i++)
+                        items.add(results.getString(i));
+                }
+
+                Map<Long, Boolean> watchLoaded = null;
+                JSONArray watchArr = root.optJSONArray("watch");
+                if (watchArr != null) {
+                    watchLoaded = new LinkedHashMap<>();
+                    for (int i = 0; i < watchArr.length(); i++) {
+                        JSONObject w = watchArr.getJSONObject(i);
+                        watchLoaded.put(parseHex(w.getString("addr")), w.optBoolean("ptr", false));
+                    }
+                }
+
+                List<PointerPath> pathsLoaded = null;
+                JSONArray pathsArr = root.optJSONArray("paths");
+                if (pathsArr != null) {
+                    pathsLoaded = new ArrayList<>();
+                    for (int i = 0; i < pathsArr.length(); i++) {
+                        JSONObject o = pathsArr.getJSONObject(i);
+                        PointerPath p = new PointerPath();
+                        p.module = o.optString("module", "");
+                        p.baseOffset = parseHex(o.getString("base"));
+                        JSONArray offs = o.getJSONArray("offsets");
+                        p.offsets = new int[offs.length()];
+                        for (int j = 0; j < offs.length(); j++) p.offsets[j] = offs.getInt(j);
+                        pathsLoaded.add(p);
+                    }
+                }
+
+                final Map<Long, Boolean> fw = watchLoaded;
+                final List<PointerPath> fp = pathsLoaded;
+                mainHandler.post(() -> {
+                    resetResults();
+                    displayItems.addAll(items);
+                    totalAddresses.set(items.size());
+                    if (adapter != null) adapter.notifyDataSetChanged();
+                    // A lista carregada é só visual: o nativo não tem esses endereços,
+                    // então o Next Scan fica desabilitado até um Novo Scan.
+                    refinable = false;
+                    updateTitle();
+                    if (fw != null) { watchAddrs.clear(); watchAddrs.putAll(fw); saveWatch(); }
+                    if (fp != null) { pointerPaths.clear(); pointerPaths.addAll(fp); }
+                    toast("Carregado: " + items.size() + " resultados, "
+                            + watchAddrs.size() + " watch, " + pointerPaths.size() + " paths");
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "loadState", e);
+                final String m = "Erro: " + e.getMessage();
+                mainHandler.post(() -> toast(m));
+            }
+        }, "memscan-load").start();
     }
 
     // ==================== API pública ====================
     public static void start(Context context) {
-        context.startService(new Intent(context, MemoryScannerService.class));
+        ContextCompat.startForegroundService(context, new Intent(context, MemoryScannerService.class));
     }
     public static void stop(Context context) {
         context.stopService(new Intent(context, MemoryScannerService.class));
